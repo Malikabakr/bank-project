@@ -1,0 +1,199 @@
+{% extends 'form_base.html' %}
+
+{% block form_title %}
+{% if card_type == 'platinum' %}Platinum Card Statement Generator
+{% elif card_type == 'corporate' %}Corporate Card Statement Generator
+{% elif card_type == 'isic' %}ISIC Card Statement Generator
+{% elif card_type == 'itic' %}ITIC Card Statement Generator
+{% elif card_type == 'iytc' %}IYTC Card Statement Generator
+{% else %}Card Statement Generator
+{% endif %}
+{% endblock %}
+
+{% block breadcrumb_title %}
+{% if card_type == 'platinum' %}Platinum Card
+{% elif card_type == 'corporate' %}Corporate Card
+{% elif card_type == 'isic' %}ISIC Card
+{% elif card_type == 'itic' %}ITIC Card
+{% elif card_type == 'iytc' %}IYTC Card
+{% else %}Card
+{% endif %}
+{% endblock %}
+
+{% block card_type %}{{ card_type|default('platinum') }}{% endblock %}
+{% block header_class %}
+{% if card_type == 'platinum' %}bg-dark
+{% elif card_type == 'corporate' %}bg-primary
+{% elif card_type == 'isic' %}bg-success
+{% elif card_type == 'itic' %}bg-info
+{% elif card_type == 'iytc' %}bg-warning
+{% else %}bg-secondary
+{% endif %}
+{% endblock %}
+{% block submit_button_class %}
+{% if card_type == 'platinum' %}btn-dark
+{% elif card_type == 'corporate' %}btn-primary
+{% elif card_type == 'isic' %}btn-success
+{% elif card_type == 'itic' %}btn-info
+{% elif card_type == 'iytc' %}btn-warning
+{% else %}btn-secondary
+{% endif %}
+{% endblock %}
+{% block progress_bar_class %}
+{% if card_type == 'platinum' %}bg-dark
+{% elif card_type == 'corporate' %}bg-primary
+{% elif card_type == 'isic' %}bg-success
+{% elif card_type == 'itic' %}bg-info
+{% elif card_type == 'iytc' %}bg-warning
+{% else %}bg-secondary
+{% endif %}
+{% endblock %}
+
+{% block card_icon %}
+{% if card_type == 'platinum' %}<i class="fas fa-crown fa-2x"></i>
+{% elif card_type == 'corporate' %}<i class="fas fa-building fa-2x"></i>
+{% elif card_type == 'isic' %}<i class="fas fa-university fa-2x"></i>
+{% elif card_type == 'itic' %}<i class="fas fa-chalkboard-teacher fa-2x"></i>
+{% elif card_type == 'iytc' %}<i class="fas fa-child fa-2x"></i>
+{% else %}<i class="fas fa-credit-card fa-2x"></i>
+{% endif %}
+{% endblock %}
+
+{% block card_title %}
+{% if card_type == 'platinum' %}Platinum Card Statement Generator
+{% elif card_type == 'corporate' %}Corporate Card Statement Generator
+{% elif card_type == 'isic' %}ISIC Card Statement Generator
+{% elif card_type == 'itic' %}ITIC Card Statement Generator
+{% elif card_type == 'iytc' %}IYTC Card Statement Generator
+{% else %}Card Statement Generator
+{% endif %}
+{% endblock %}
+
+{% block card_subtitle %}
+{% if card_type == 'platinum' %}Premium banking experience
+{% elif card_type == 'corporate' %}Business banking made easy
+{% elif card_type == 'isic' %}International Student Identity Card
+{% elif card_type == 'itic' %}International Teacher Identity Card
+{% elif card_type == 'iytc' %}International Youth Travel Card
+{% else %}Upload your Excel data to generate card statements.
+{% endif %}
+{% endblock %}
+
+{% block card_description %}
+{% if card_type == 'platinum' %}
+<p class="lead mb-4">Generate premium Platinum card statements from your Excel data. Each row will be converted to a professional-looking statement with elegant metallic design.</p>
+{% elif card_type == 'corporate' %}
+<p class="lead mb-4">Generate professional Corporate card statements from your Excel data. Each row will be converted to a statement with your corporate branding.</p>
+{% elif card_type == 'isic' %}
+<p class="lead mb-4">Generate ISIC card statements for students, including university information and more.</p>
+{% elif card_type == 'itic' %}
+<p class="lead mb-4">Generate ITIC card statements for teachers, including university information and more.</p>
+{% elif card_type == 'iytc' %}
+<p class="lead mb-4">Generate IYTC card statements for youth, including university information and more.</p>
+{% else %}
+<p class="lead mb-4">Upload your Excel data to generate card statements.</p>
+{% endif %}
+{% endblock %}
+
+{% block info_title %}
+{% if card_type == 'platinum' %}Platinum Card Features
+{% elif card_type == 'corporate' %}Corporate Card Features
+{% elif card_type == 'isic' %}ISIC Card Features
+{% elif card_type == 'itic' %}ITIC Card Features
+{% elif card_type == 'iytc' %}IYTC Card Features
+{% else %}Card Features
+{% endif %}
+{% endblock %}
+
+{% block info_icon_class %}
+{% if card_type == 'platinum' %}text-dark
+{% elif card_type == 'corporate' %}text-primary
+{% elif card_type == 'isic' %}text-success
+{% elif card_type == 'itic' %}text-info
+{% elif card_type == 'iytc' %}text-warning
+{% else %}text-secondary
+{% endif %}
+{% endblock %}
+
+{% block card_info %}
+<p>The Platinum Card template includes premium features:</p>
+<div class="row mt-4">
+    <div class="col-md-6">
+        <ul class="list-group list-group-flush">
+            <li class="list-group-item">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                Metallic dark design with gold accents
+            </li>
+            <li class="list-group-item">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                Detailed transaction history with categorization
+            </li>
+            <li class="list-group-item">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                Monthly spending analysis section
+            </li>
+        </ul>
+    </div>
+    <div class="col-md-6">
+        <ul class="list-group list-group-flush">
+            <li class="list-group-item">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                Rewards points summary
+            </li>
+            <li class="list-group-item">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                Premium customer service contact information
+            </li>
+            <li class="list-group-item">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                High-quality card-sized design
+            </li>
+        </ul>
+    </div>
+</div>
+{% endblock %}
+
+{% block excel_columns %}
+<tr>
+    <td><code>Name</code></td>
+    <td>Account holder's name</td>
+    <td>John Smith</td>
+</tr>
+<tr>
+    <td><code>Account_Number</code></td>
+    <td>Card number (16 digits)</td>
+    <td>5412751234567890</td>
+</tr>
+<tr>
+    <td><code>Date</code></td>
+    <td>Statement date/Expiry date</td>
+    <td>12/25/2023</td>
+</tr>
+<tr>
+    <td><code>Transaction_Description</code></td>
+    <td>Description of transaction</td>
+    <td>Premium Purchase - Luxury Hotel</td>
+</tr>
+<tr>
+    <td><code>Amount</code></td>
+    <td>Transaction amount</td>
+    <td>1,250.00</td>
+</tr>
+<tr>
+    <td><code>Balance</code></td>
+    <td>Current balance</td>
+    <td>5,432.10</td>
+</tr>
+<tr>
+    <td><code>Rewards_Points</code> (optional)</td>
+    <td>Accumulated rewards points</td>
+    <td>25,000</td>
+</tr>
+{% endblock %}
+
+{% block excel_notes %}
+<div class="alert alert-dark mt-3">
+    <i class="fas fa-crown me-2"></i>
+    <strong>Platinum Benefits:</strong> Include the optional <code>Rewards_Points</code> column to display your customer's premium rewards balance on their statements.
+</div>
+{% endblock %}

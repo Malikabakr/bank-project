@@ -1,0 +1,294 @@
+{% extends 'base.html' %}
+
+{% block title %}Select Card Form{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="row mb-4">
+        <div class="col-12 text-center">
+            <h1 class="display-4 fw-bold text-primary">
+                <i class="fas fa-credit-card me-3"></i>
+                Choose a template style to generate your bank statements
+            </h1>
+            <p class="lead">Choose a template style to generate your bank statements</p>
+        </div>
+    </div>
+
+    <!-- Tab navigation -->
+    <div class="row">
+        <div class="col-12">
+            <ul class="nav nav-tabs nav-fill" id="cardTypeTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="premium-tab" data-bs-toggle="tab" data-bs-target="#premium" type="button" role="tab">
+                        <i class="fas fa-star me-2"></i>Platinum Cards
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="corporate-tab" data-bs-toggle="tab" data-bs-target="#corporate" type="button" role="tab">
+                        <i class="fas fa-building me-2"></i>Corporate Cards
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="business-tab" data-bs-toggle="tab" data-bs-target="#business" type="button" role="tab">
+                        <i class="fas fa-briefcase me-2"></i>Business Cards
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="student-tab" data-bs-toggle="tab" data-bs-target="#student" type="button" role="tab">
+                        <i class="fas fa-user-graduate me-2"></i>Student Cards
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="custom-tab" data-bs-toggle="tab" data-bs-target="#custom" type="button" role="tab">
+                        <i class="fas fa-edit me-2"></i>Card Collection
+                    </button>
+                </li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Tab content -->
+    <div class="tab-content py-4" id="cardTypeTabsContent">
+        <!-- Premium Cards Tab -->
+        <div class="tab-pane fade show active" id="premium" role="tabpanel">
+            <div class="row">
+                <div class="col-lg-6">
+                    <div class="card mb-4 border-0 shadow-lg card-hover h-100">
+                        <div class="row g-0">
+                            <div class="col-md-4 bg-gradient bg-dark text-white d-flex align-items-center justify-content-center">
+                                <i class="fas fa-crown fa-4x m-3"></i>
+                            </div>
+                            <div class="col-md-8">
+                                <div class="card-body p-4">
+                                    <h3 class="card-title">Platinum Card</h3>
+                                    <p class="card-text">Premium statement format with elegant design for platinum cardholders.</p>
+                                    <ul class="list-unstyled">
+                                        <li><i class="fas fa-check text-success me-2"></i>High-quality metallic finish</li>
+                                        <li><i class="fas fa-check text-success me-2"></i>Detailed transaction history</li>
+                                        <li><i class="fas fa-check text-success me-2"></i>Rewards points summary</li>
+                                    </ul>
+                                    <a href="{{ url_for('platinum_form') }}" class="btn btn-primary mt-3">
+                                        <i class="fas fa-arrow-right me-2"></i>Select
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Corporate Cards Tab -->
+        <div class="tab-pane fade" id="corporate" role="tabpanel">
+            <div class="row">
+                <div class="col-lg-6">
+                    <div class="card mb-4 border-0 shadow-lg card-hover h-100">
+                        <div class="row g-0">
+                            <div class="col-md-4 bg-gradient bg-primary text-white d-flex align-items-center justify-content-center">
+                                <i class="fas fa-building fa-4x m-3"></i>
+                            </div>
+                            <div class="col-md-8">
+                                <div class="card-body p-4">
+                                    <h3 class="card-title">Corporate Card</h3>
+                                    <p class="card-text">Enterprise-level statement format for corporations and institutions.</p>
+                                    <ul class="list-unstyled">
+                                        <li><i class="fas fa-check text-success me-2"></i>Professional business design</li>
+                                        <li><i class="fas fa-check text-success me-2"></i>Multi-account summary view</li>
+                                        <li><i class="fas fa-check text-success me-2"></i>Department expense tracking</li>
+                                    </ul>
+                                    <a href="{{ url_for('corporate_form') }}" class="btn btn-primary mt-3">
+                                        <i class="fas fa-arrow-right me-2"></i>Select
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Business Cards Tab -->
+        <div class="tab-pane fade" id="business" role="tabpanel">
+            <div class="row">
+                <div class="col-lg-6">
+                    <div class="card mb-4 border-0 shadow-lg card-hover h-100">
+                        <div class="row g-0">
+                            <div class="col-md-4 bg-gradient bg-info text-white d-flex align-items-center justify-content-center">
+                                <i class="fas fa-briefcase fa-4x m-3"></i>
+                            </div>
+                            <div class="col-md-8">
+                                <div class="card-body p-4">
+                                    <h3 class="card-title">Business Card</h3>
+                                    <p class="card-text">Optimized statement format for small to medium business accounts.</p>
+                                    <ul class="list-unstyled">
+                                        <li><i class="fas fa-check text-success me-2"></i>Business expense tracking</li>
+                                        <li><i class="fas fa-check text-success me-2"></i>Tax category labeling</li>
+                                        <li><i class="fas fa-check text-success me-2"></i>Financial summary graphs</li>
+                                    </ul>
+                                    <a href="{{ url_for('business_form') }}" class="btn btn-info text-white mt-3">
+                                        <i class="fas fa-arrow-right me-2"></i>Select
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Student Cards Tab -->
+        <div class="tab-pane fade" id="student" role="tabpanel">
+            <div class="row">
+                <div class="col-lg-4">
+                    <div class="card mb-4 border-0 shadow-lg card-hover h-100">
+                        <div class="card-header bg-success text-white">
+                            <h3 class="mb-0 text-center">ISIC Card</h3>
+                        </div>
+                        <div class="card-body p-4 text-center">
+                            <i class="fas fa-university fa-4x text-success mb-4"></i>
+                            <p>International Student Identity Card statement format with student-specific categories.</p>
+                            <a href="{{ url_for('isic_form') }}" class="btn btn-success mt-3 d-block">Select</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-4">
+                    <div class="card mb-4 border-0 shadow-lg card-hover h-100">
+                        <div class="card-header bg-indigo text-white">
+                            <h3 class="mb-0 text-center">ITIC Card</h3>
+                        </div>
+                        <div class="card-body p-4 text-center">
+                            <i class="fas fa-chalkboard-teacher fa-4x text-indigo mb-4"></i>
+                            <p>International Teacher Identity Card statement format for education professionals.</p>
+                            <a href="{{ url_for('itic_form') }}" class="btn btn-primary mt-3 d-block">Select</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-4">
+                    <div class="card mb-4 border-0 shadow-lg card-hover h-100">
+                        <div class="card-header bg-warning text-dark">
+                            <h3 class="mb-0 text-center">IYTC Card</h3>
+                        </div>
+                        <div class="card-body p-4 text-center">
+                            <i class="fas fa-user-graduate fa-4x text-warning mb-4"></i>
+                            <p>International Youth Travel Card statement format with travel expense tracking.</p>
+                            <a href="{{ url_for('iytc_form') }}" class="btn btn-warning mt-3 d-block">Select</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Custom Tab -->
+        <div class="tab-pane fade" id="custom" role="tabpanel">
+            <div class="row justify-content-center">
+                <div class="col-lg-8">
+                    <div class="card border-0 shadow-lg card-hover">
+                        <div class="card-body p-5">
+                            <div class="row">
+                                <div class="col-md-3 d-flex align-items-center justify-content-center">
+                                    <i class="fas fa-credit-card fa-5x text-primary"></i>
+                                </div>
+                                <div class="col-md-9">
+                                    <h3 class="card-title">Card Collection</h3>
+                                    <p class="card-text lead">Browse and select from our collection of card templates with various designs and features.</p>
+                                    <div class="d-flex gap-3 mt-4">
+                                        <a href="{{ url_for('a4_form') }}" class="btn btn-primary btn-lg">
+                                            <i class="fas fa-arrow-right me-2"></i>View Collection
+                                        </a>
+                                        <a href="{{ url_for('template_builder') }}" class="btn btn-outline-secondary btn-lg">
+                                            <i class="fas fa-plus me-2"></i>Create New Template
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Template selection guide -->
+    <div class="row mt-5">
+        <div class="col-12">
+            <div class="card bg-light border-0">
+                <div class="card-body p-4">
+                    <h4>
+                        <i class="fas fa-lightbulb text-warning me-2"></i>
+                        How to choose the right template
+                    </h4>
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="p-3">
+                                <h5><i class="fas fa-crown text-primary me-2"></i>Premium Cards</h5>
+                                <p class="small">Ideal for high-value accounts and premium banking services. Features elegant designs and detailed transaction breakdowns.</p>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="p-3">
+                                <h5><i class="fas fa-briefcase text-info me-2"></i>Business Cards</h5>
+                                <p class="small">Best for company accounts with business-specific categorization, tax information, and expense tracking features.</p>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="p-3">
+                                <h5><i class="fas fa-user-graduate text-success me-2"></i>Student Cards</h5>
+                                <p class="small">Tailored for educational institutions and student accounts with special categories for educational expenses.</p>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="p-3">
+                                <h5><i class="fas fa-edit text-danger me-2"></i>Card Collection</h5>
+                                <p class="small">Browse our collection of card templates or create your own custom design with our template builder.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block styles %}
+<style>
+    .bg-indigo {
+        background-color: #6610f2;
+    }
+    .text-indigo {
+        color: #6610f2;
+    }
+    .card-hover {
+        transition: transform 0.3s, box-shadow 0.3s;
+    }
+    .card-hover:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 15px 30px rgba(0, 0, 0, 0.1) !important;
+    }
+    .nav-tabs .nav-link {
+        font-weight: 500;
+        font-size: 1.1rem;
+        padding: 1rem 1.5rem;
+    }
+    .nav-tabs .nav-link.active {
+        border-bottom: 3px solid #0d6efd;
+        background-color: rgba(13, 110, 253, 0.05);
+    }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Initialize all tabs
+    document.addEventListener('DOMContentLoaded', function() {
+        var tabTriggerList = [].slice.call(document.querySelectorAll('#cardTypeTabs button'))
+        tabTriggerList.forEach(function (tabTriggerEl) {
+            tabTriggerEl.addEventListener('click', function (event) {
+                event.preventDefault();
+                var tabTrigger = new bootstrap.Tab(tabTriggerEl);
+                tabTrigger.show();
+            });
+        });
+    });
+</script>
+{% endblock %}

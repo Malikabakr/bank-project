@@ -1,0 +1,358 @@
+{% extends 'base.html' %}
+
+{% block title %}{% block form_title %}Card Form{% endblock %}{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Header Section -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{{ url_for('index') }}">Home</a></li>
+                    <li class="breadcrumb-item"><a href="{{ url_for('card_selection') }}">Card Selection</a></li>
+                    <li class="breadcrumb-item active" aria-current="page">{% block breadcrumb_title %}Card Form{% endblock %}</li>
+                </ol>
+            </nav>
+        </div>
+    </div>
+
+    <div class="row justify-content-center">
+        <div class="col-lg-9">
+            <!-- Card Form -->
+            <div class="card shadow-lg border-0 rounded-3 mb-4">
+                <!-- Card Header -->
+                <div class="card-header {% block header_class %}bg-primary{% endblock %} text-white">
+                    <div class="d-flex align-items-center">
+                        <div class="card-header-icon me-3">
+                            {% block card_icon %}<i class="fas fa-credit-card fa-2x"></i>{% endblock %}
+                        </div>
+                        <div>
+                            <h2 class="mb-0">{% block card_title %}Card Statement Generator{% endblock %}</h2>
+                            <p class="mb-0 lead">{% block card_subtitle %}Generate PDF statements from Excel data{% endblock %}</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Card Body -->
+                <div class="card-body p-lg-5">
+                    {% block card_description %}
+                    <p class="lead mb-4">
+                        Upload your Excel file containing data for card statements. Each row will be converted into an individual PDF statement.
+                    </p>
+                    {% endblock %}
+                    
+                    <form id="uploadForm" action="{{ url_for('upload_excel') }}" method="post" enctype="multipart/form-data" class="mb-4">
+                        <input type="hidden" name="card_type" value="{% block card_type %}generic{% endblock %}">
+                        
+                        {% block form_fields %}
+                        <!-- Excel File Upload -->
+                        <div class="mb-4">
+                            <label for="excelFile" class="form-label fw-bold">
+                                <i class="fas fa-file-excel text-success me-2"></i>Excel File
+                            </label>
+                            <input type="file" class="form-control form-control-lg" id="excelFile" name="file" accept=".xlsx,.xls" required>
+                            <div class="form-text">
+                                Supported formats: .xlsx, .xls (Excel files). Make sure your Excel file contains the necessary data fields.
+                            </div>
+                        </div>
+                        
+                        <!-- Custom Template Upload (optional) -->
+                        {% block template_upload %}{% endblock %}
+                        
+                        <!-- Additional Form Fields -->
+                        {% block additional_fields %}{% endblock %}
+                        {% endblock %}
+                        
+                        <!-- Submit Button -->
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn {% block submit_button_class %}btn-primary{% endblock %} btn-lg">
+                                <i class="fas fa-file-pdf me-2"></i>Generate PDF Statements
+                            </button>
+                        </div>
+                    </form>
+                    
+                    <!-- Progress container (initially hidden) -->
+                    <div class="progress-container mt-4" id="progressContainer" style="display: none;">
+                        <h5 class="mb-2">
+                            <i class="fas fa-spinner fa-spin me-2"></i>Processing your Excel file...
+                        </h5>
+                        <div class="progress" style="height: 25px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated {% block progress_bar_class %}bg-primary{% endblock %}" 
+                                id="progressBar" role="progressbar" style="width: 0%;" 
+                                aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Success message (initially hidden) -->
+                    <div class="alert alert-success mt-4" id="successMessage" style="display: none;">
+                        <h5 class="alert-heading">
+                            <i class="fas fa-check-circle me-2"></i>
+                            Success!
+                        </h5>
+                        <p>Your PDF statements have been generated successfully.</p>
+                        <hr>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <a href="#" id="downloadLink" class="btn btn-success w-100">
+                                    <i class="fas fa-download me-2"></i>Download All PDFs (ZIP)
+                                </a>
+                            </div>
+                            <div class="col-md-6 mt-3 mt-md-0">
+                                <a href="{{ url_for('card_selection') }}" class="btn btn-outline-primary w-100">
+                                    <i class="fas fa-credit-card me-2"></i>Generate Another Statement
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Card Info Box -->
+            <div class="card mb-4 border-0 shadow">
+                <div class="card-body">
+                    <h4 class="card-title">
+                        <i class="fas fa-info-circle {% block info_icon_class %}text-primary{% endblock %} me-2"></i>
+                        {% block info_title %}Card Information{% endblock %}
+                    </h4>
+                    
+                    {% block card_info %}
+                    <p>This card format includes the following features:</p>
+                    <ul>
+                        <li>Formatted statement with account details</li>
+                        <li>Transaction history section</li>
+                        <li>Balance information</li>
+                    </ul>
+                    {% endblock %}
+                    
+                    {% block additional_info %}{% endblock %}
+                </div>
+            </div>
+            
+            <!-- Excel Format Guide -->
+            <div class="card mb-4 border-0 shadow-sm">
+                <div class="card-header bg-light">
+                    <h5 class="mb-0">
+                        <i class="fas fa-table me-2"></i>
+                        Excel Format Guide
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <p>For best results, your Excel file should contain the following columns for the selected card type:</p>
+                    <div class="mb-3" style="max-width: 300px;">
+                        <select id="formCardTypeSelect" class="form-select">
+                            <option value="platinum">Platinum</option>
+                            <option value="corporate">Corporate</option>
+                            <option value="business">Business</option>
+                            <option value="isic">ISIC</option>
+                            <option value="itic">ITIC</option>
+                            <option value="iytc">IYTC</option>
+                            <option value="a4">A4</option>
+                        </select>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-bordered">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Column Name</th>
+                                    <th>Description</th>
+                                    <th>Example</th>
+                                </tr>
+                            </thead>
+                            <tbody id="formExcelGuideTableBody">
+                                <!-- Will be filled by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="alert alert-info mt-3" id="formExcelGuideNote"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Define the card guides
+    const formCardGuides = {
+        platinum: {
+            headers: [
+                {name: 'Activation Code', desc: 'Activation code for the card', example: '625-240'},
+                {name: 'Card Last Digits', desc: 'Last four digits of the card', example: '9987'},
+                {name: 'Cardholder Name', desc: 'Name of the cardholder', example: 'John Smith'},
+                {name: 'Card Phone Number', desc: 'Phone number associated with the card', example: '9647515471706'},
+                {name: 'Delivery Location', desc: 'Delivery address/location', example: 'Dream city 263'},
+                {name: 'Address Title', desc: 'Title for the address (optional)', example: 'Boulevard'},
+                {name: 'Address Description', desc: 'Description for the address (optional)', example: 'E1-8-56'}
+            ],
+            note: '<b>Platinum Benefits:</b> Include the optional <b>Address Title</b> and <b>Address Description</b> columns for more detailed delivery information.'
+        },
+        corporate: {
+            headers: [
+                {name: 'Activation Code', desc: 'Activation code for the card', example: '742-469'},
+                {name: 'Cardholder Name', desc: 'Name of the cardholder', example: 'Jane Doe'},
+                {name: 'Card Last Digits', desc: 'Last four digits of the card', example: '3499'},
+                {name: 'Card Phone Number', desc: 'Phone number associated with the card', example: '9647507895199'},
+                {name: 'Delivery Location', desc: 'Delivery address/location', example: 'FIB - Sulaymaniyah Branch'}
+            ],
+            note: 'Corporate cards require 5 columns as shown above.'
+        },
+        business: {
+            headers: [
+                {name: 'Activation Code', desc: 'Activation code for the card', example: '797-376'},
+                {name: 'Card Last Digits', desc: 'Last four digits of the card', example: '7643'},
+                {name: 'Cardholder Name', desc: 'Name of the cardholder', example: 'Bashdar Khudhur'},
+                {name: 'Onboarding Name', desc: 'Onboarding name (if applicable)', example: 'Acme Onboarding'},
+                {name: 'Card Phone Number', desc: 'Phone number associated with the card', example: '9647507895199'},
+                {name: 'Delivery Location', desc: 'Delivery address/location', example: 'FIB - Erbil Branch'},
+                {name: 'Address Title', desc: 'Title for the address (optional)', example: 'Office 101'},
+                {name: 'Address Description', desc: 'Description for the address (optional)', example: 'Main Street, Floor 2'}
+            ],
+            note: 'Business cards can include optional onboarding and address details.'
+        },
+        isic: {
+            headers: [
+                {name: 'Card Last Digits', desc: 'Last four digits of the card', example: '5007'},
+                {name: 'Delivery Location', desc: 'Delivery address/location', example: 'FIB - Duhok Branch'},
+                {name: 'Card Phone Number', desc: 'Phone number associated with the card', example: '9647507895199'},
+                {name: 'Cardholder Name', desc: 'Name of the cardholder', example: 'Jehad Adris'},
+                {name: 'University', desc: 'University name', example: 'Sulaimani University'}
+            ],
+            note: 'ISIC cards require 5 columns as shown above.'
+        },
+        itic: {
+            headers: [
+                {name: 'Card Last Digits', desc: 'Last four digits of the card', example: '6752'},
+                {name: 'Delivery Location', desc: 'Delivery address/location', example: 'FIB - Duhok Branch'},
+                {name: 'Card Phone Number', desc: 'Phone number associated with the card', example: '9647507895199'},
+                {name: 'Cardholder Name', desc: 'Name of the cardholder', example: 'Zana Salh'},
+                {name: 'University', desc: 'University name', example: 'Koya University'}
+            ],
+            note: 'ITIC cards require 5 columns as shown above.'
+        },
+        iytc: {
+            headers: [
+                {name: 'Card Last Digits', desc: 'Last four digits of the card', example: '9945'},
+                {name: 'Delivery Location', desc: 'Delivery address/location', example: 'FIB - Erbil Branch'},
+                {name: 'Cardholder Name', desc: 'Name of the cardholder', example: 'Vian Qasim'},
+                {name: 'University', desc: 'University name', example: 'Erbil Polytechnic'}
+            ],
+            note: 'IYTC cards require 4 columns as shown above.'
+        },
+        a4: {
+            headers: [
+                {name: 'Cardholder Name', desc: 'Name of the cardholder', example: 'John Smith'},
+                {name: 'Card Phone Number', desc: 'Phone number associated with the card', example: '9647515471706'},
+                {name: 'Card Last Digits', desc: 'Last four digits of the card', example: '9987'},
+                {name: 'Delivery Location', desc: 'Delivery address/location', example: 'Dream city 263'}
+            ],
+            note: 'A4 cards require 4 columns as shown above.'
+        }
+    };
+
+    // Function to render the guide for the selected card type
+    function renderFormGuide(cardType) {
+        const guide = formCardGuides[cardType];
+        const tbody = document.getElementById('formExcelGuideTableBody');
+        tbody.innerHTML = '';
+        guide.headers.forEach(h => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td>${h.name}</td><td>${h.desc}</td><td>${h.example}</td>`;
+            tbody.appendChild(tr);
+        });
+        document.getElementById('formExcelGuideNote').innerHTML = guide.note;
+    }
+
+    // Add event listener to the dropdown
+    document.getElementById('formCardTypeSelect').addEventListener('change', function() {
+        renderFormGuide(this.value);
+    });
+
+    // Initial render
+    renderFormGuide('platinum');
+
+    // Handle form submission
+    document.getElementById('uploadForm').addEventListener('submit', function (event) {
+        event.preventDefault();
+        let formData = new FormData(this);
+        
+        // Disable form inputs
+        const formElements = this.elements;
+        for (let i = 0; i < formElements.length; i++) {
+            formElements[i].disabled = true;
+        }
+        
+        // Show progress
+        document.getElementById('progressContainer').style.display = 'block';
+
+        fetch('{{ url_for("upload_excel") }}', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'started') {
+                let progressBar = document.getElementById('progressBar');
+                let zipFilename = data.zip_filename;
+
+                // Poll for progress updates
+                let interval = setInterval(function () {
+                    fetch('{{ url_for("get_progress") }}')
+                        .then(response => response.json())
+                        .then(data => {
+                            let progress = data.progress;
+                            progressBar.style.width = progress + '%';
+                            progressBar.textContent = progress + '%';
+                            progressBar.setAttribute('aria-valuenow', progress);
+
+                            if (progress === 100) {
+                                clearInterval(interval);
+                                document.getElementById('successMessage').style.display = 'block';
+                                
+                                // Set the download link
+                                const downloadLink = document.getElementById('downloadLink');
+                                downloadLink.href = `/download/${encodeURIComponent(zipFilename)}`;
+                            } else if (progress < 0) {
+                                // Error occurred
+                                clearInterval(interval);
+                                progressBar.classList.remove('bg-primary', 'bg-success', 'bg-info', 'bg-warning');
+                                progressBar.classList.add('bg-danger');
+                                progressBar.textContent = 'Error!';
+                                
+                                // Re-enable form
+                                for (let i = 0; i < formElements.length; i++) {
+                                    formElements[i].disabled = false;
+                                }
+                                
+                                alert('An error occurred during processing. Please try again.');
+                            }
+                        });
+                }, 1000);
+            } else {
+                alert('Error: ' + data.message);
+                
+                // Re-enable form
+                for (let i = 0; i < formElements.length; i++) {
+                    formElements[i].disabled = false;
+                }
+                
+                document.getElementById('progressContainer').style.display = 'none';
+            }
+        })
+        .catch(error => {
+            console.error('Error uploading file:', error);
+            alert('Error uploading file. Please try again.');
+            
+            // Re-enable form
+            for (let i = 0; i < formElements.length; i++) {
+                formElements[i].disabled = false;
+            }
+            
+            document.getElementById('progressContainer').style.display = 'none';
+        });
+    });
+    
+    {% block additional_scripts %}{% endblock %}
+</script>
+{% endblock %}

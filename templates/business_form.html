@@ -1,0 +1,110 @@
+{% extends 'form_base.html' %}
+
+{% block form_title %}Business Card Statement Generator{% endblock %}
+{% block breadcrumb_title %}Business Card{% endblock %}
+
+{% block card_type %}business{% endblock %}
+{% block header_class %}bg-info{% endblock %}
+{% block submit_button_class %}btn-info{% endblock %}
+{% block progress_bar_class %}bg-info{% endblock %}
+
+{% block card_icon %}<i class="fas fa-briefcase fa-2x"></i>{% endblock %}
+{% block card_title %}Business Card Statement Generator{% endblock %}
+{% block card_subtitle %}Professional business banking{% endblock %}
+
+{% block card_description %}
+<p class="lead mb-4">
+    Generate business card statements for your company accounts from Excel data. Each row will be converted to a professionally designed business statement with dedicated expense tracking.
+</p>
+{% endblock %}
+
+{% block info_title %}Business Card Features{% endblock %}
+{% block info_icon_class %}text-info{% endblock %}
+
+{% block card_info %}
+<p>The Business Card template is designed for professional company use:</p>
+<div class="row mt-4">
+    <div class="col-md-6">
+        <ul class="list-group list-group-flush">
+            <li class="list-group-item">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                Professional blue business design
+            </li>
+            <li class="list-group-item">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                Business expense categorization
+            </li>
+            <li class="list-group-item">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                Tax category labeling
+            </li>
+        </ul>
+    </div>
+    <div class="col-md-6">
+        <ul class="list-group list-group-flush">
+            <li class="list-group-item">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                Financial summary section
+            </li>
+            <li class="list-group-item">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                Business contact information
+            </li>
+            <li class="list-group-item">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                Corporate account identifiers
+            </li>
+        </ul>
+    </div>
+</div>
+{% endblock %}
+
+{% block excel_columns %}
+<tr>
+    <td><code>Name</code></td>
+    <td>Business/Company name</td>
+    <td>Acme Corporation</td>
+</tr>
+<tr>
+    <td><code>Account_Number</code></td>
+    <td>Card number (16 digits)</td>
+    <td>4512781234567890</td>
+</tr>
+<tr>
+    <td><code>Date</code></td>
+    <td>Statement date/Expiry date</td>
+    <td>12/25/2023</td>
+</tr>
+<tr>
+    <td><code>Transaction_Description</code></td>
+    <td>Description of transaction</td>
+    <td>Office Supplies - Paper Co.</td>
+</tr>
+<tr>
+    <td><code>Amount</code></td>
+    <td>Transaction amount</td>
+    <td>1,250.00</td>
+</tr>
+<tr>
+    <td><code>Balance</code></td>
+    <td>Current balance</td>
+    <td>15,432.10</td>
+</tr>
+<tr>
+    <td><code>Tax_ID</code> (optional)</td>
+    <td>Business tax ID</td>
+    <td>12-3456789</td>
+</tr>
+<tr>
+    <td><code>Department</code> (optional)</td>
+    <td>Business department</td>
+    <td>Marketing</td>
+</tr>
+{% endblock %}
+
+{% block excel_notes %}
+<div class="alert alert-info mt-3">
+    <i class="fas fa-briefcase me-2"></i>
+    <strong>Business Features:</strong> Include the optional <code>Tax_ID</code> and <code>Department</code> columns to display business-specific information on your statements for better expense tracking.
+</div>
+{% endblock %}

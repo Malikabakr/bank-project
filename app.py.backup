@@ -1,0 +1,2405 @@
+import os
+import logging
+import uuid
+import zipfile
+import time
+import threading
+from datetime import datetime, timedelta
+from flask import (
+    Flask,
+    render_template,
+    request,
+    redirect,
+    url_for,
+    flash,
+    session,
+    send_file,
+    jsonify,
+)
+import pandas as pd
+from werkzeug.utils import secure_filename
+from io import BytesIO
+from PyPDF2 import PdfReader, PdfWriter
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from arabic_reshaper import reshape
+from bidi.algorithm import get_display
+import openpyxl
+from fpdf import FPDF
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
+import fpdf
+import re
+import fitz
+from apscheduler.schedulers.background import BackgroundScheduler
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("file_cleanup.log"), logging.StreamHandler()],
+)
+logger = logging.getLogger(__name__)
+
+# Define project folder and paths
+PROJECT_FOLDER = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_FOLDER = os.path.join(PROJECT_FOLDER, "static", "uploads")
+GENERATED_PDFS_FOLDER = os.path.join(PROJECT_FOLDER, "static", "uploads", "pdf")
+TEMPLATES_FOLDER = os.path.join(PROJECT_FOLDER, "static", "uploads", "templates")
+TEMP_FOLDER = os.path.join(PROJECT_FOLDER, "static", "uploads", "temp")
+
+# File cleanup settings
+FILE_AGE_LIMIT = 2  # minutes
+CLEANUP_INTERVAL = 1  # minutes
+
+
+def is_file_old_enough(file_path):
+    """Check if file is older than FILE_AGE_LIMIT minutes"""
+    try:
+        mtime = os.path.getmtime(file_path)
+        file_age = datetime.now() - datetime.fromtimestamp(mtime)
+        return file_age > timedelta(minutes=FILE_AGE_LIMIT)
+    except Exception:
+        return True
+
+
+def perform_cleanup():
+    """Clean up old files from upload directories"""
+    try:
+        # List of directories to clean
+        cleanup_dirs = [UPLOAD_FOLDER, GENERATED_PDFS_FOLDER, TEMP_FOLDER]
+
+        deleted_files = []
+        skipped_files = []
+        failed_files = []
+
+        logger.info("Starting scheduled cleanup check...")
+
+        for directory in cleanup_dirs:
+            if not os.path.exists(directory):
+                logger.info(f"Directory does not exist, skipping: {directory}")
+                continue
+
+            # Clean files in directory and subdirectories
+            for root, dirs, files in os.walk(directory, topdown=False):
+                # Clean files first
+                for name in files:
+                    file_path = os.path.join(root, name)
+                    try:
+                        if is_file_old_enough(file_path):
+                            # Get file info before deletion
+                            file_age = datetime.now() - datetime.fromtimestamp(
+                                os.path.getmtime(file_path)
+                            )
+                            file_size = os.path.getsize(file_path)
+
+                            # Delete the file
+                            os.unlink(file_path)
+
+                            # Log deletion with details
+                            logger.info(
+                                f"Deleted file: {file_path}\n"
+                                f"    Age: {int(file_age.total_seconds() / 60)} minutes {int(file_age.total_seconds() % 60)} seconds\n"
+                                f"    Size: {file_size / 1024:.2f} KB"
+                            )
+                            deleted_files.append(file_path)
+                        else:
+                            age = datetime.now() - datetime.fromtimestamp(
+                                os.path.getmtime(file_path)
+                            )
+                            logger.info(  # Changed from debug to info
+                                f"Skipped file (too young): {file_path}\n"
+                                f"    Current age: {int(age.total_seconds() / 60)} minutes {int(age.total_seconds() % 60)} seconds"
+                            )
+                            skipped_files.append(file_path)
+                    except Exception as e:
+                        logger.error(f"Error deleting file {file_path}: {str(e)}")
+                        failed_files.append(file_path)
+
+        # Log summary with details of skipped files
+        logger.info(
+            f"Cleanup Summary:\n"
+            f"    Deleted: {len(deleted_files)} items\n"
+            f"    Skipped: {len(skipped_files)} items\n"
+            f"    Failed: {len(failed_files)} items\n\n"
+            f"Skipped Files List:\n" + "\n".join(f"    - {f}" for f in skipped_files)
+        )
+
+        # Ensure required directories exist
+        for dir_path in [
+            UPLOAD_FOLDER,
+            GENERATED_PDFS_FOLDER,
+            TEMPLATES_FOLDER,
+            TEMP_FOLDER,
+        ]:
+            if not os.path.exists(dir_path):
+                os.makedirs(dir_path)
+                logger.info(f"Recreated directory: {dir_path}")
+
+    except Exception as e:
+        logger.error(f"Error during cleanup: {str(e)}")
+
+
+# Initialize the scheduler
+scheduler = BackgroundScheduler()
+scheduler.add_job(
+    func=perform_cleanup,
+    trigger="interval",
+    minutes=CLEANUP_INTERVAL,
+    id="cleanup_job",
+    name="Clean up old files",
+    replace_existing=True,
+)
+scheduler.start()
+
+# Create Flask app
+app = Flask(__name__)
+app.secret_key = os.environ.get("SESSION_SECRET", "dev_secret_key")
+
+# Configuration
+ALLOWED_EXTENSIONS = {
+    "excel": {"xlsx", "xls"},
+    "pdf": {"pdf"},
+    "word": {"docx", "doc"},
+    "text": {"txt", "csv"},
+}
+
+# Max file upload size (16MB)
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.config["GENERATED_PDFS_FOLDER"] = GENERATED_PDFS_FOLDER
+app.config["TEMPLATES_FOLDER"] = TEMPLATES_FOLDER
+
+# Create folders if they don't exist
+for folder in [UPLOAD_FOLDER, TEMPLATES_FOLDER, GENERATED_PDFS_FOLDER, TEMP_FOLDER]:
+    os.makedirs(folder, exist_ok=True)
+
+# Global progress tracker (thread-safe)
+progress_tracker = {}
+
+
+def update_progress(session_id, value):
+    """Update progress value for a session"""
+    progress_tracker[session_id] = value
+
+
+def allowed_file(filename, file_type):
+    """Check if a file has an allowed extension"""
+    return "." in filename and filename.rsplit(".", 1)[
+        1
+    ].lower() in ALLOWED_EXTENSIONS.get(file_type, {})
+
+
+def format_arabic_text(text):
+    """Format Arabic text for proper display"""
+    if not text:
+        return ""
+    try:
+        # Convert to string and handle any non-string inputs
+        text_str = str(text).strip()
+
+        # Check if the text contains Arabic characters
+        if any("\u0600" <= char <= "\u06ff" for char in text_str):
+            # Reshape and apply bidi
+            reshaped_text = reshape(text_str)
+            return get_display(reshaped_text)
+        return text_str
+    except Exception as e:
+        logger.error(f"Error formatting text: {e}")
+        # Return original as string if there was an error
+        if isinstance(text, str):
+            return text
+        return str(text) if text is not None else ""
+
+
+@app.route("/")
+def index():
+    """Home page"""
+    # Assign a unique session ID if not already set
+    if "session_id" not in session:
+        session["session_id"] = str(uuid.uuid4())
+    return render_template("index.html")
+
+
+@app.route("/card_selection")
+def card_selection():
+    """Card selection page"""
+    # Assign a unique session ID if not already set
+    if "session_id" not in session:
+        session["session_id"] = str(uuid.uuid4())
+    return render_template("card_form_selection.html")
+
+
+@app.route("/platinum_form")
+def platinum_form():
+    """Platinum card form page"""
+    return render_template("platinum_form.html")
+
+
+@app.route("/business_form")
+def business_form():
+    """Business card form page"""
+    return render_template("business_form.html")
+
+
+@app.route("/corporate_form")
+def corporate_form():
+    """Corporate card form page"""
+    return render_template("platinum_form.html", card_type="corporate")
+
+
+@app.route("/isic_form")
+def isic_form():
+    """ISIC card form page"""
+    return render_template("platinum_form.html", card_type="isic")
+
+
+@app.route("/itic_form")
+def itic_form():
+    """ITIC card form page"""
+    return render_template("platinum_form.html", card_type="itic")
+
+
+@app.route("/iytc_form")
+def iytc_form():
+    """IYTC card form page"""
+    return render_template("platinum_form.html", card_type="iytc")
+
+
+@app.route("/a4_form")
+def a4_form():
+    """A4 form page"""
+    return render_template("a4_form.html")
+
+
+@app.route("/progress")
+def get_progress():
+    """Get the progress of current conversion job"""
+    session_id = session.get("session_id", None)
+    if session_id and session_id in progress_tracker:
+        progress = progress_tracker[session_id]
+        if progress == -1:
+            return jsonify(
+                {
+                    "progress": -1,
+                    "error": "An error occurred during processing. Please try again.",
+                }
+            )
+        return jsonify({"progress": progress})
+    return jsonify({"progress": 0})
+
+
+# =====================================
+# Excel to PDF Conversion
+# =====================================
+@app.route("/excel_to_pdf", methods=["GET", "POST"])
+def excel_to_pdf():
+    """Convert Excel file to PDF (simple table, no mapping)"""
+    if request.method == "POST":
+        if "file" not in request.files:
+            flash("No file selected", "danger")
+            return redirect(request.url)
+        file = request.files["file"]
+        if file.filename == "":
+            flash("No file selected", "danger")
+            return redirect(request.url)
+        if file and allowed_file(file.filename, "excel"):
+            session_id = session.get("session_id", str(uuid.uuid4()))
+            session["session_id"] = session_id
+            filename = secure_filename(file.filename)
+            excel_path = os.path.join(
+                UPLOAD_FOLDER, f"{session_id}_excel2pdf_{filename}"
+            )
+            file.save(excel_path)
+            try:
+                pdf_filename = os.path.splitext(filename)[0] + ".pdf"
+                pdf_path = os.path.join(
+                    GENERATED_PDFS_FOLDER, f"{session_id}_{pdf_filename}"
+                )
+                excel_table_to_pdf(excel_path, pdf_path)
+                session["excel2pdf_pdf_file"] = pdf_path
+                session["excel2pdf_pdf_name"] = pdf_filename
+                flash("Excel table successfully converted to PDF", "success")
+                return redirect(url_for("download_excel2pdf_pdf"))
+            except Exception as e:
+                logger.error(f"Error converting Excel to PDF: {str(e)}")
+                flash(f"Error converting Excel to PDF: {str(e)}", "danger")
+                return redirect(request.url)
+        else:
+            flash("Invalid file type. Allowed types: xlsx, xls", "warning")
+            return redirect(request.url)
+    return render_template("excel_to_pdf.html")
+
+
+@app.route("/download_excel2pdf_pdf")
+def download_excel2pdf_pdf():
+    """Download the Excel-to-PDF table PDF"""
+    if "excel2pdf_pdf_file" not in session:
+        flash("No converted PDF file available", "warning")
+        return redirect(url_for("excel_to_pdf"))
+    pdf_path = session["excel2pdf_pdf_file"]
+    filename = session.get("excel2pdf_pdf_name", os.path.basename(pdf_path))
+    return send_file(
+        pdf_path, mimetype="application/pdf", as_attachment=True, download_name=filename
+    )
+
+
+@app.route("/upload_excel", methods=["POST"])
+def upload_excel():
+    """Upload Excel file and process according to card type"""
+    # Check if file part exists
+    if "file" not in request.files:
+        return jsonify({"status": "error", "message": "No file selected"})
+
+    file = request.files["file"]
+
+    # Check if filename is empty
+    if file.filename == "":
+        return jsonify({"status": "error", "message": "No file selected"})
+
+    # Check if file is allowed
+    if file and allowed_file(file.filename, "excel"):
+        # Create a unique session ID if not already set
+        session_id = session.get("session_id", str(uuid.uuid4()))
+        session["session_id"] = session_id
+
+        # Get the card type from the form
+        card_type = request.form.get(
+            "card_type", "platinum"
+        )  # Default to 'platinum' if not provided
+        session["card_type"] = card_type
+
+        # Check if a PDF template was uploaded (for A4 form)
+        pdf_template = None
+        if (
+            "pdf_template" in request.files
+            and request.files["pdf_template"].filename != ""
+        ):
+            template_file = request.files["pdf_template"]
+            template_filename = template_file.filename
+            if template_filename and allowed_file(template_filename, "pdf"):
+                template_filename = secure_filename(template_filename)
+                template_path = os.path.join(
+                    TEMPLATES_FOLDER, f"{session_id}_{card_type}_template.pdf"
+                )
+                template_file.save(template_path)
+                pdf_template = template_path
+                session["pdf_template"] = template_path
+
+        # Save the Excel file
+        filename = file.filename
+        excel_path = None
+        if filename:
+            secure_name = secure_filename(filename)
+            excel_path = os.path.join(UPLOAD_FOLDER, f"{session_id}_{secure_name}")
+            file.save(excel_path)
+            session["excel_file"] = excel_path
+        else:
+            # Should never happen since we already checked for empty filename above
+            # But providing a fallback for safety
+            excel_path = os.path.join(UPLOAD_FOLDER, f"{session_id}_data.xlsx")
+            file.save(excel_path)
+            session["excel_file"] = excel_path
+
+        try:
+            # Start processing Excel data in a new thread
+            update_progress(session_id, 0)  # Initialize progress
+
+            # Create the output zip filename
+            if filename:
+                zip_name = os.path.splitext(filename)[0]
+                zip_filename = f"{zip_name}_{card_type}.zip"
+                session["zip_filename"] = zip_filename
+            else:
+                zip_filename = f"statements_{card_type}_{session_id}.zip"
+                session["zip_filename"] = zip_filename
+
+            # Start processing in the background
+            threading.Thread(
+                target=process_excel_with_template,
+                args=(excel_path, session_id, card_type, pdf_template, zip_filename),
+            ).start()
+
+            return jsonify(
+                {
+                    "status": "started",
+                    "message": "PDF generation started.",
+                    "zip_filename": zip_filename,
+                }
+            )
+
+        except Exception as e:
+            logger.error(f"Error starting Excel processing: {str(e)}")
+            return jsonify({"status": "error", "message": f"Error: {str(e)}"})
+    else:
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Invalid file type. Please upload an Excel file (.xlsx, .xls).",
+            }
+        )
+
+
+# B5 size in points (width, height)
+B5_SIZE = (498.9, 708.7)  # Standard B5 size in points
+
+POSITIONS = {
+    "platinum": [
+        (288, 375),  # activation code
+        (258, 406),  # last four digits
+        (183, 435),  # name
+        (245, 465),  # phone number
+        (230, 507),  # delivery address
+        (123, 568),  # address title
+        (123, 585),  # address description
+    ],
+    "corporate": [
+        (155, 375),  # activation code
+        (152, 407),  # name
+        (152, 470),  # last four digits
+        (152, 525),  # phone number
+        (152, 585),  # delivery address
+    ],
+    "business": [
+        (280, 375),  # activation code
+        (290, 405),  # last four digits
+        (210, 430),  # name
+        (185, 445),  # onboarding name
+        (240, 470),  # phone number
+        (230, 507),  # delivery address
+        (123, 568),  # address title
+        (123, 585),  # address description
+    ],
+    "isic": [
+        (150, 423),  # last four digits
+        (150, 463),  # delivery address
+        (150, 503),  # phone number
+        (150, 538),  # name
+        (150, 575),  # university
+    ],
+    "itic": [
+        (150, 423),  # last four digits
+        (150, 463),  # delivery address
+        (150, 503),  # phone number
+        (150, 538),  # name
+        (150, 575),  # university
+    ],
+    "iytc": [
+        (150, 463),  # last four digits
+        (150, 503),  # delivery address
+        (150, 538),  # phone number
+        (150, 575),  # name
+    ],
+    "a4": [
+        (195, 340),  # name
+        (195, 380),  # phone number
+        (195, 415),  # last four digits
+        (195, 450),  # delivery address
+    ],
+}
+
+FIELD_ORDERS = {
+    "platinum": [
+        "activation code",
+        "last four digits",
+        "name",
+        "phone number",
+        "delivery address",
+        "address title",
+        "address description",
+    ],
+    "corporate": [
+        "activation code",
+        "name",
+        "last four digits",
+        "phone number",
+        "delivery address",
+    ],
+    "business": [
+        "activation code",
+        "last four digits",
+        "name",
+        "onboarding name",
+        "phone number",
+        "delivery address",
+        "address title",
+        "address description",
+    ],
+    "isic": [
+        "last four digits",
+        "delivery address",
+        "phone number",
+        "name",
+        "university",
+    ],
+    "itic": [
+        "last four digits",
+        "delivery address",
+        "phone number",
+        "name",
+        "university",
+    ],
+    "iytc": ["last four digits", "delivery address", "phone number", "name"],
+    "a4": ["name", "phone number", "last four digits", "delivery address"],
+}
+
+# 1. Make sure all keys in HEADER_TO_FIELD and FIELD_ORDERS are lowercase
+HEADER_TO_FIELD = {
+    "card phone number": "phone number",
+    "phone number": "phone number",
+    "card last digits": "last four digits",
+    "last four digits": "last four digits",
+    "cardholder name": "name",
+    "name": "name",
+    "activation code": "activation code",
+    "delivery location": "delivery address",
+    "delivery address": "delivery address",
+    "address title": "address title",
+    "address description": "address description",
+    "onboarding name": "onboarding name",
+    "university": "university",
+}
+
+
+def is_arabic(text):
+    text = str(text)
+    # Remove invisible characters
+    text = re.sub(r"[\u200e\u200f\u202a-\u202e]", "", text)
+    # Count Arabic letters
+    arabic_count = sum("\u0600" <= char <= "\u06ff" for char in text)
+    # If more than half the letters are Arabic, treat as Arabic
+    return arabic_count > (len(text.strip()) / 2)
+
+
+def replace_dashes_in_text(text):
+    """Replace dashes in text with appropriate values"""
+    if not text:
+        return text
+
+    # Convert to string if not already
+    text = str(text)
+
+    # Replace common dash patterns
+    replacements = {
+        "---": "",  # Remove triple dashes
+        "--": "",  # Remove double dashes
+        "-": "",  # Remove single dashes
+    }
+
+    for dash, replacement in replacements.items():
+        text = text.replace(dash, replacement)
+
+    return text.strip()
+
+
+def replace_dashes_in_pdf(template_path, output_path, values):
+    """Replace dashes in template PDF with values from Excel, sorted by position."""
+    try:
+        logger.info(f"[REPLACE_DASHES] Template path: {template_path}")
+        logger.info(f"[REPLACE_DASHES] Output path: {output_path}")
+        logger.info(f"[REPLACE_DASHES] Values to insert: {values}")
+        doc = fitz.open(template_path)
+        new_doc = fitz.open()
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            new_page = new_doc.new_page(width=page.rect.width, height=page.rect.height)
+            new_page.show_pdf_page(new_page.rect, doc, page_num)
+            # Find dashes and sort by (y, x) position
+            text_instances = page.search_for("-")
+            logger.info(
+                f"[REPLACE_DASHES] Page {page_num}: Found {len(text_instances)} dashes."
+            )
+            text_instances = sorted(text_instances, key=lambda r: (r.y0, r.x0))
+            for i, rect in enumerate(text_instances):
+                if i >= len(values):
+                    logger.info(
+                        f"[REPLACE_DASHES] No more values to insert at dash {i}."
+                    )
+                    break
+                new_page.draw_rect(rect, color=(1, 1, 1), fill=(1, 1, 1))
+                value = str(values[i])
+                logger.info(
+                    f"[REPLACE_DASHES] Replacing dash {i} at {rect} with value: {value}"
+                )
+                # Fix: Use format_arabic_text for Arabic/Kurdish text
+                if any("\u0600" <= c <= "\u06ff" for c in value):
+                    value = format_arabic_text(value)
+                    font_path = os.path.join(
+                        PROJECT_FOLDER, "NotoNaskhArabic-Regular.ttf"
+                    )
+                    if os.path.exists(font_path):
+                        new_page.insert_font("NotoNaskhArabic", font_path)
+                        new_page.insert_text(
+                            (rect.x0, rect.y1 - 2),
+                            value,
+                            fontsize=12,
+                            fontname="NotoNaskhArabic",
+                        )
+                    else:
+                        new_page.insert_text((rect.x0, rect.y1 - 2), value, fontsize=12)
+                else:
+                    font_path = os.path.join(PROJECT_FOLDER, "times.ttf")
+                    if os.path.exists(font_path):
+                        new_page.insert_font("Times", font_path)
+                        new_page.insert_text(
+                            (rect.x0, rect.y1 - 2), value, fontsize=12, fontname="Times"
+                        )
+                    else:
+                        new_page.insert_text((rect.x0, rect.y1 - 2), value, fontsize=12)
+        new_doc.save(output_path)
+        new_doc.close()
+        doc.close()
+        logger.info(
+            f"[REPLACE_DASHES] Finished replacing dashes and saved to {output_path}"
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Error replacing dashes in PDF: {str(e)}")
+        return False
+
+
+# Add this mapping dictionary at the top of the file, after the imports
+TEMPLATE_MAPPING = {
+    "platinum": "platinum.pdf",
+    "corporate": "Corporate.pdf",
+    "business": "Business.pdf",
+    "isic": "ISIC.pdf",
+    "itic": "ITIC.pdf",
+    "iytc": "IYTC.pdf",
+    "cardcollection": "cardcollection.pdf",
+}
+
+
+def generate_pdf_for_card_type(
+    row_data, output_path, card_type="a4", template_path=None
+):
+    """Generate a PDF by overlaying data on the template if provided, otherwise create a B5-size PDF from scratch for standard card types."""
+    try:
+        logger.info("=" * 50)
+        logger.info("STARTING PDF GENERATION")
+        logger.info("=" * 50)
+        logger.info(f"Card type: {card_type}")
+
+        # Get the appropriate template based on card type
+        template_mapping = {
+            "platinum": "platinum.pdf",
+            "corporate": "Corporate.pdf",
+            "business": "Business.pdf",
+            "isic": "ISIC.pdf",
+            "itic": "ITIC.pdf",
+            "iytc": "IYTC.pdf",
+            "a4": "cardcollection.pdf",
+        }
+
+        # If no template path provided, use the default template for the card type
+        if not template_path and card_type in template_mapping:
+            template_path = os.path.join(
+                PROJECT_FOLDER, "static", "card_templates", template_mapping[card_type]
+            )
+            logger.info(f"Using default template for {card_type}: {template_path}")
+
+        logger.info(f"Template path: {template_path}")
+        logger.info(f"Output path: {output_path}")
+        logger.info(f"Row data received: {row_data}")
+
+        if template_path and os.path.exists(template_path):
+            # Get values in the correct order based on card type
+            values = []
+            if card_type == "platinum":
+                values = [
+                    row_data.get("activation code", ""),
+                    row_data.get("last four digits", ""),
+                    row_data.get("name", ""),
+                    row_data.get("phone number", ""),
+                    row_data.get("delivery address", ""),
+                    row_data.get("address title", ""),
+                    row_data.get("address description", ""),
+                ]
+            elif card_type == "corporate":
+                values = [
+                    row_data.get("activation code", ""),
+                    row_data.get("name", ""),
+                    row_data.get("last four digits", ""),
+                    row_data.get("phone number", ""),
+                    row_data.get("delivery address", ""),
+                ]
+            elif card_type == "business":
+                values = [
+                    row_data.get("activation code", ""),
+                    row_data.get("last four digits", ""),
+                    row_data.get("name", ""),
+                    row_data.get("onboarding name", ""),
+                    row_data.get("phone number", ""),
+                    row_data.get("delivery address", ""),
+                    row_data.get("address title", ""),
+                    row_data.get("address description", ""),
+                ]
+            elif card_type == "isic":
+                values = [
+                    row_data.get("last four digits", ""),
+                    row_data.get("delivery address", ""),
+                    row_data.get("phone number", ""),
+                    row_data.get("name", ""),
+                    row_data.get("university", ""),
+                ]
+            elif card_type == "itic":
+                values = [
+                    row_data.get("last four digits", ""),
+                    row_data.get("delivery address", ""),
+                    row_data.get("phone number", ""),
+                    row_data.get("name", ""),
+                    row_data.get("university", ""),
+                ]
+            elif card_type == "iytc":
+                values = [
+                    row_data.get("last four digits", ""),
+                    row_data.get("delivery address", ""),
+                    row_data.get("phone number", ""),
+                    row_data.get("name", ""),
+                ]
+            elif card_type == "a4":
+                values = [
+                    row_data.get("name", ""),
+                    row_data.get("phone number", ""),
+                    row_data.get("last four digits", ""),
+                    row_data.get("delivery address", ""),
+                ]
+                logger.info(f"[REPLACE_DASHES] Values to insert: {values}")
+                replace_dashes_in_pdf(template_path, output_path, values)
+                return True
+
+            # Replace dashes in template with values
+            success = replace_dashes_in_pdf(template_path, output_path, values)
+            if success:
+                logger.info(f"Successfully generated PDF at {output_path}")
+                return True
+            else:
+                logger.error("Failed to replace dashes in template")
+                return False
+        else:
+            # If no template provided, use the old method
+            logger.info("No template provided, using default PDF generation")
+            # B5 size in points
+            B5_SIZE = (498.9, 708.7)
+            pdf = FPDF(unit="pt", format=B5_SIZE)
+            pdf.add_page()
+            font_path = os.path.join(PROJECT_FOLDER, "NotoNaskhArabic-Regular.ttf")
+            pdf.add_font("NotoNaskhArabic", "", font_path, uni=True)
+            times_font_path = os.path.join(PROJECT_FOLDER, "times.ttf")
+            pdf.add_font("Times", "", times_font_path, uni=True)
+
+            def print_field(val, x, y, size=14, force_times=False):
+                if not force_times and is_arabic(val):
+                    pdf.set_font("NotoNaskhArabic", "", size)
+                    pdf.set_xy(x, y)
+                    pdf.cell(0, 10, txt=format_arabic_text(val), ln=False)
+                else:
+                    pdf.set_font("Times", "", size)
+                    pdf.set_xy(x, y)
+                    pdf.cell(0, 10, txt=str(val), ln=False)
+
+            name = row_data.get("name", row_data.get("cardholder name", ""))
+            phone = row_data.get("phone number", row_data.get("card phone number", ""))
+            last_digits = row_data.get(
+                "last four digits", row_data.get("card last digits", "")
+            )
+            address = row_data.get(
+                "delivery address", row_data.get("delivery location", "")
+            )
+            activation_code = row_data.get("activation code", "")
+            address_title = row_data.get("address title", "")
+            address_description = row_data.get("address description", "")
+            onboarding_name = row_data.get("onboarding name", "")
+            university = row_data.get("university", "")
+            POSITIONS = {
+                "platinum": [
+                    (288, 375),  # activation code
+                    (258, 406),  # last four digits
+                    (183, 435),  # name
+                    (245, 465),  # phone number
+                    (230, 507),  # delivery address
+                    (123, 568),  # address title
+                    (123, 585),  # address description
+                ],
+                "corporate": [
+                    (155, 375),  # activation code
+                    (152, 407),  # name
+                    (152, 470),  # last four digits
+                    (152, 525),  # phone number
+                    (152, 585),  # delivery address
+                ],
+                "business": [
+                    (280, 375),  # activation code
+                    (290, 405),  # last four digits
+                    (210, 430),  # name
+                    (185, 445),  # onboarding name
+                    (240, 470),  # phone number
+                    (230, 507),  # delivery address
+                    (123, 568),  # address title
+                    (123, 585),  # address description
+                ],
+                "isic": [
+                    (150, 423),  # last four digits
+                    (150, 463),  # delivery address
+                    (150, 503),  # phone number
+                    (150, 538),  # name
+                    (150, 575),  # university
+                ],
+                "itic": [
+                    (150, 423),  # last four digits
+                    (150, 463),  # delivery address
+                    (150, 503),  # phone number
+                    (150, 538),  # name
+                    (150, 575),  # university
+                ],
+                "iytc": [
+                    (150, 463),  # last four digits
+                    (150, 503),  # delivery address
+                    (150, 538),  # phone number
+                    (150, 575),  # name
+                ],
+                "a4": [
+                    (195, 340),  # name
+                    (195, 380),  # phone number
+                    (195, 415),  # last four digits
+                    (195, 450),  # delivery address
+                ],
+            }
+            positions = POSITIONS.get(card_type, POSITIONS["platinum"])
+            if card_type == "platinum":
+                print_field(activation_code, *positions[0], force_times=True)
+                print_field(last_digits, *positions[1], force_times=True)
+                print_field(name, *positions[2], force_times=True)
+                print_field(phone, *positions[3], force_times=True)
+                print_field(address, *positions[4], force_times=True)
+                (
+                    pdf.set_font("NotoNaskhArabic", "", 8)
+                    if is_arabic(address_title)
+                    else pdf.set_font("Times", "", 8)
+                )
+                pdf.set_xy(*positions[5])
+                pdf.cell(
+                    0,
+                    10,
+                    txt=(
+                        format_arabic_text(address_title)
+                        if is_arabic(address_title)
+                        else str(address_title)
+                    ),
+                    ln=False,
+                )
+                (
+                    pdf.set_font("NotoNaskhArabic", "", 8)
+                    if is_arabic(address_description)
+                    else pdf.set_font("Times", "", 8)
+                )
+                pdf.set_xy(*positions[6])
+                pdf.cell(
+                    0,
+                    10,
+                    txt=(
+                        format_arabic_text(address_description)
+                        if is_arabic(address_description)
+                        else str(address_description)
+                    ),
+                    ln=False,
+                )
+            elif card_type == "corporate":
+                print_field(activation_code, *positions[0], force_times=True)
+                print_field(name, *positions[1], force_times=True)
+                print_field(last_digits, *positions[2], force_times=True)
+                print_field(phone, *positions[3], force_times=True)
+                print_field(address, *positions[4], force_times=True)
+            elif card_type == "business":
+                print_field(activation_code, *positions[0], force_times=True)
+                print_field(last_digits, *positions[1], force_times=True)
+                print_field(name, *positions[2], force_times=True)
+                print_field(onboarding_name, *positions[3], force_times=True)
+                print_field(phone, *positions[4], force_times=True)
+                print_field(address, *positions[5], force_times=True)
+                (
+                    pdf.set_font("NotoNaskhArabic", "", 8)
+                    if is_arabic(address_title)
+                    else pdf.set_font("Times", "", 8)
+                )
+                pdf.set_xy(*positions[6])
+                pdf.cell(
+                    0,
+                    10,
+                    txt=(
+                        format_arabic_text(address_title)
+                        if is_arabic(address_title)
+                        else str(address_title)
+                    ),
+                    ln=False,
+                )
+                (
+                    pdf.set_font("NotoNaskhArabic", "", 8)
+                    if is_arabic(address_description)
+                    else pdf.set_font("Times", "", 8)
+                )
+                pdf.set_xy(*positions[7])
+                pdf.cell(
+                    0,
+                    10,
+                    txt=(
+                        format_arabic_text(address_description)
+                        if is_arabic(address_description)
+                        else str(address_description)
+                    ),
+                    ln=False,
+                )
+            elif card_type == "isic":
+                print_field(last_digits, *positions[0], force_times=True)
+                print_field(address, *positions[1], force_times=True)
+                print_field(phone, *positions[2], force_times=True)
+                print_field(name, *positions[3], force_times=True)
+                print_field(university, *positions[4], force_times=True)
+            elif card_type == "itic":
+                print_field(last_digits, *positions[0], force_times=True)
+                print_field(address, *positions[1], force_times=True)
+                print_field(phone, *positions[2], force_times=True)
+                print_field(name, *positions[3], force_times=True)
+                print_field(university, *positions[4], force_times=True)
+            elif card_type == "iytc":
+                print_field(last_digits, *positions[0], force_times=True)
+                print_field(address, *positions[1], force_times=True)
+                print_field(phone, *positions[2], force_times=True)
+                print_field(name, *positions[3], force_times=True)
+            elif card_type == "a4":
+                print_field(name, *positions[0], size=20, force_times=True)
+                print_field(phone, *positions[1], size=20, force_times=True)
+                print_field(last_digits, *positions[2], size=20, force_times=True)
+                print_field(address, *positions[3], size=20, force_times=True)
+            else:
+                # Default: just print all fields
+                y = 100
+                for k, v in row_data.items():
+                    print_field(v, 50, y, force_times=True)
+                    y += 20
+            pdf.output(output_path)
+            logger.info(f"Successfully generated B5-size PDF at {output_path}")
+            logger.info("=" * 50)
+            logger.info("PDF GENERATION COMPLETED")
+            logger.info("=" * 50)
+            return True
+    except Exception as e:
+        logger.error(f"Error generating PDF: {str(e)}")
+        logger.exception("Full traceback:")
+        return False
+
+
+def process_excel_with_template(
+    excel_path, session_id, card_type, pdf_template=None, zip_filename=None
+):
+    """Process Excel file with the appropriate template based on card type, using robust header mapping."""
+    try:
+        update_progress(session_id, 5)
+        import openpyxl
+
+        wb = openpyxl.load_workbook(excel_path)
+        sheet = wb.active
+        # Clean up empty rows and columns
+        for row in range(sheet.max_row, 0, -1):
+            if all(cell.value is None for cell in sheet[row]):
+                sheet.delete_rows(row)
+        for col in range(sheet.max_column, 0, -1):
+            if all(cell.value is None for cell in sheet[get_column_letter(col)]):
+                sheet.delete_cols(col)
+        headers = []
+        for header in sheet[1]:
+            if header.value:
+                headers.append(str(header.value).strip().lower())
+            else:
+                headers.append("")
+        total_rows = max(sheet.max_row - 1, 1)
+        output_folder = os.path.join(GENERATED_PDFS_FOLDER, session_id)
+        os.makedirs(output_folder, exist_ok=True)
+        pdf_paths = []
+        for idx, row in enumerate(
+            sheet.iter_rows(min_row=2, values_only=True), start=1
+        ):
+            if not any(cell for cell in row):
+                print(f"Skipping empty row {idx}")
+                continue
+            # Robust row_dict creation
+            row_dict = {
+                headers[i].lower(): (
+                    str(row[i]).strip() if i < len(row) and row[i] is not None else ""
+                )
+                for i in range(len(headers))
+            }
+            mapped_row = {}
+            for k, v in row_dict.items():
+                k_lower = k.lower()
+                mapped_key = HEADER_TO_FIELD.get(k_lower, k_lower)
+                mapped_row[mapped_key] = v
+            print(f"[DEBUG] Row {idx} mapped_row: {mapped_row}")
+            name = mapped_row.get("name", "")
+            if not name:
+                name = mapped_row.get("cardholder name", "")
+            last_digits = mapped_row.get("last four digits", "")
+            if not last_digits:
+                last_digits = mapped_row.get("card last digits", "")
+            name_clean = secure_filename(name.replace(" ", "_"))
+            pdf_filename = f"{name_clean.replace('_', ' ')} , {last_digits}.pdf"
+            pdf_path = os.path.join(output_folder, pdf_filename)
+            generate_pdf_for_card_type(mapped_row, pdf_path, card_type, pdf_template)
+            pdf_paths.append(pdf_filename)
+            if total_rows > 0:
+                completion_ratio = float(idx) / float(total_rows)
+                progress_percent = int(completion_ratio * 85)
+                base_progress = 5
+                progress_value = int(base_progress) + int(progress_percent)
+                progress_final = min(max(0, progress_value), 99)
+                update_progress(session_id, progress_final)
+            time.sleep(0.05)
+        if zip_filename is None:
+            zip_filename = f"{session_id}_{card_type}.zip"
+        zip_path = os.path.join(TEMP_FOLDER, zip_filename)
+        with zipfile.ZipFile(zip_path, "w") as zipf:
+            for pdf_path in pdf_paths:
+                full_path = os.path.join(output_folder, pdf_path)
+                if os.path.exists(full_path):
+                    zipf.write(full_path, pdf_path)
+        update_progress(session_id, 100)
+        zip_info_path = os.path.join(TEMP_FOLDER, f"{session_id}_zip_info.txt")
+        with open(zip_info_path, "w") as f:
+            f.write(zip_path)
+    except Exception as e:
+        logger.error(f"Error in Excel processing: {str(e)}")
+        update_progress(session_id, -1)
+
+
+@app.route("/preview_excel")
+def preview_excel():
+    """Preview Excel data before conversion"""
+    if "processed_data" not in session:
+        flash("Please upload an Excel file first", "warning")
+        return redirect(url_for("excel_to_pdf"))
+
+    try:
+        # Load the processed data
+        df = pd.read_csv(session["processed_data"])
+
+        # Get a sample for preview (first 5 rows)
+        sample_data = df.head(5).to_dict("records")
+        columns = df.columns.tolist()
+
+        # Generate a sample PDF
+        session_id = session["session_id"]
+        sample_pdf_path = os.path.join(
+            GENERATED_PDFS_FOLDER, f"{session_id}_sample.pdf"
+        )
+
+        if not os.path.exists(sample_pdf_path):
+            generate_pdf_for_card_type(df.iloc[0], sample_pdf_path)
+
+        return render_template(
+            "preview_excel.html",
+            sample_data=sample_data,
+            columns=columns,
+            row_count=session["row_count"],
+            sample_pdf_path=f"/view_pdf/{session_id}/sample.pdf",
+        )
+    except Exception as e:
+        logger.error(f"Error in preview: {str(e)}")
+        flash(f"Error preparing preview: {str(e)}", "danger")
+        return redirect(url_for("excel_to_pdf"))
+
+
+@app.route("/generate_pdfs", methods=["POST"])
+def generate_pdfs():
+    """Generate PDFs from Excel data"""
+    if "processed_data" not in session:
+        flash("Please upload an Excel file first", "warning")
+        return redirect(url_for("excel_to_pdf"))
+
+    try:
+        # Load the processed data
+        df = pd.read_csv(session["processed_data"])
+        session_id = session["session_id"]
+
+        # Start processing in a new thread
+        threading.Thread(target=process_excel_to_pdfs, args=(df, session_id)).start()
+
+        # Redirect to a progress page
+        return redirect(url_for("show_progress", job_type="excel_to_pdf"))
+    except Exception as e:
+        logger.error(f"Error generating PDFs: {str(e)}")
+        flash(f"Error generating PDFs: {str(e)}", "danger")
+        return redirect(url_for("preview_excel"))
+
+
+def process_excel_to_pdfs(df, session_id):
+    """Process Excel data to PDFs in background"""
+    try:
+        update_progress(session_id, 0)
+
+        # Create output folder
+        output_folder = os.path.join(GENERATED_PDFS_FOLDER, session_id)
+        os.makedirs(output_folder, exist_ok=True)
+
+        # Generate PDF for each row
+        pdf_paths = []
+        total_rows = len(df)
+
+        for i, row in df.iterrows():
+            pdf_path = os.path.join(output_folder, f"statement_{i}.pdf")
+            generate_pdf_for_card_type(row, pdf_path)
+            pdf_paths.append(f"statement_{i}.pdf")
+
+            # Update progress
+            progress = int((i + 1) / total_rows * 100)
+            update_progress(session_id, progress)
+            time.sleep(0.1)  # Small delay to prevent hogging CPU
+
+        # Store PDF paths in a file
+        paths_file = os.path.join(TEMP_FOLDER, f"{session_id}_pdf_paths.txt")
+        with open(paths_file, "w") as f:
+            f.write("\n".join(pdf_paths))
+
+        # Set progress to 100% when done
+        update_progress(session_id, 100)
+    except Exception as e:
+        logger.error(f"Error in background processing: {str(e)}")
+        update_progress(session_id, -1)  # Negative value indicates error
+
+
+# =====================================
+# PDF Editor
+# =====================================
+@app.route("/pdf_editor", methods=["GET", "POST"])
+def pdf_editor():
+    """PDF Editor page"""
+    if request.method == "POST":
+        # Check if file part exists
+        if "file" not in request.files:
+            flash("No file selected", "danger")
+            return redirect(request.url)
+
+        file = request.files["file"]
+
+        # Check if filename is empty
+        if file.filename == "":
+            flash("No file selected", "danger")
+            return redirect(request.url)
+
+        # Check if file is allowed
+        if file and allowed_file(file.filename, "pdf"):
+            # Create a unique session ID
+            session_id = session.get("session_id", str(uuid.uuid4()))
+            session["session_id"] = session_id
+
+            # Save the file
+            if file.filename:
+                filename = secure_filename(file.filename)
+                pdf_path = os.path.join(
+                    GENERATED_PDFS_FOLDER, f"{session_id}_{filename}"
+                )
+                file.save(pdf_path)
+                session["pdf_file"] = pdf_path
+            else:
+                flash("No file selected", "danger")
+                return redirect(request.url)
+
+            # Redirect to editor
+            return redirect(url_for("edit_pdf", filename=filename))
+        else:
+            flash("Invalid file type. Allowed types: pdf", "warning")
+            return redirect(request.url)
+
+    return render_template("pdf_editor.html")
+
+
+@app.route("/edit_pdf/<filename>")
+def edit_pdf(filename):
+    """Edit PDF file"""
+    if "pdf_file" not in session:
+        flash("Please upload a PDF file first", "warning")
+        return redirect(url_for("pdf_editor"))
+
+    pdf_path = session["pdf_file"]
+    session_id = session["session_id"]
+
+    # Ensure the PDF exists and is valid - create a test PDF if needed
+    if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+        logger.warning(
+            f"PDF file is missing or empty: {pdf_path}. Creating a sample PDF."
+        )
+        create_sample_pdf(pdf_path)
+
+    return render_template(
+        "edit.html",
+        pdf_path=f"/view_pdf/{session_id}/{os.path.basename(pdf_path)}",
+        filename=filename,
+    )
+
+
+def create_sample_pdf(output_path):
+    """Create a sample PDF for testing the editor"""
+    try:
+        # Create a PDF with some sample content
+        c = canvas.Canvas(output_path, pagesize=letter)
+        width, height = letter
+
+        # Add a title
+        c.setFont("Helvetica-Bold", 24)
+        c.drawString(100, height - 100, "Sample PDF Document")
+
+        # Add some text
+        c.setFont("Helvetica", 12)
+        c.drawString(
+            100,
+            height - 150,
+            "This is a sample PDF document for testing the PDF editor.",
+        )
+        c.drawString(
+            100,
+            height - 170,
+            "You can add text, highlights, and other annotations to this document.",
+        )
+
+        # Add a rectangle
+        c.rect(100, height - 250, 400, 50, stroke=1, fill=0)
+        c.setFont("Helvetica", 10)
+        c.drawString(
+            120, height - 220, "This is a sample area you can highlight or annotate."
+        )
+
+        # Add footer
+        c.setFont("Helvetica-Oblique", 10)
+        c.drawString(100, 50, "Sample PDF created by PDFMakerPro")
+
+        c.save()
+        logger.info(f"Sample PDF created at {output_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Error creating sample PDF: {str(e)}")
+        return False
+
+
+@app.route("/save_pdf_edits", methods=["POST"])
+def save_pdf_edits():
+    """Save edits to PDF file"""
+    if "pdf_file" not in session:
+        return jsonify({"error": "No PDF file in session"}), 400
+
+    data = request.json
+    if not data:
+        return jsonify({"error": "No edit data provided"}), 400
+
+    edits = data.get("edits", [])
+
+    try:
+        pdf_path = session["pdf_file"]
+        session_id = session["session_id"]
+
+        # Create edited file path
+        edited_pdf_path = os.path.join(
+            GENERATED_PDFS_FOLDER, f"{session_id}_edited_{os.path.basename(pdf_path)}"
+        )
+
+        # Apply edits
+        edit_pdf_file(pdf_path, edited_pdf_path, edits)
+
+        # Update session
+        session["edited_pdf_file"] = edited_pdf_path
+
+        return jsonify(
+            {
+                "success": True,
+                "message": "PDF updated successfully",
+                "download_url": url_for("download_edited_pdf"),
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error saving edits: {str(e)}")
+        return jsonify({"error": f"Error saving edits: {str(e)}"}), 500
+
+
+@app.route("/download_edited_pdf")
+def download_edited_pdf():
+    """Download edited PDF file"""
+    if "edited_pdf_file" not in session:
+        flash("No edited PDF file available", "warning")
+        return redirect(url_for("pdf_editor"))
+
+    pdf_path = session["edited_pdf_file"]
+    filename = os.path.basename(pdf_path)
+
+    return send_file(
+        pdf_path,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"edited_{filename}",
+    )
+
+
+# =====================================
+# PDF to Word Conversion
+# =====================================
+@app.route("/pdf_to_word", methods=["GET", "POST"])
+def pdf_to_word():
+    """Convert PDF to Word"""
+    if request.method == "POST":
+        if "file" not in request.files:
+            flash("No file selected", "danger")
+            return redirect(request.url)
+        file = request.files["file"]
+        if file.filename == "":
+            flash("No file selected", "danger")
+            return redirect(request.url)
+        if file and allowed_file(file.filename, "pdf"):
+            session_id = session.get("session_id", str(uuid.uuid4()))
+            session["session_id"] = session_id
+            if file.filename:
+                filename = secure_filename(file.filename)
+                session["pdf_filename"] = filename
+                pdf_path = os.path.join(
+                    GENERATED_PDFS_FOLDER, f"{session_id}_{filename}"
+                )
+                file.save(pdf_path)
+            else:
+                flash("No file selected", "danger")
+                return redirect(request.url)
+            try:
+                word_path = os.path.join(
+                    TEMP_FOLDER, f"{session_id}_{filename.rsplit('.', 1)[0]}.docx"
+                )
+                success = convert_pdf_to_word(pdf_path, word_path)
+                if success:
+                    session["word_file"] = word_path
+                    flash("PDF successfully converted to Word", "success")
+                    return redirect(url_for("download_word"))
+                else:
+                    if os.path.exists(word_path):
+                        os.remove(word_path)
+                    flash("Error converting PDF to Word", "danger")
+                    return redirect(request.url)
+            except Exception as e:
+                logger.error(f"Error converting PDF: {str(e)}")
+                if os.path.exists(word_path):
+                    os.remove(word_path)
+                flash(f"Error converting PDF: {str(e)}", "danger")
+                return redirect(request.url)
+        else:
+            flash("Invalid file type. Allowed types: pdf", "warning")
+            return redirect(request.url)
+    return render_template("pdf_to_word.html")
+
+
+@app.route("/download_word")
+def download_word():
+    """Download converted Word file"""
+    if "word_file" not in session:
+        flash("No converted Word file available", "warning")
+        return redirect(url_for("pdf_to_word"))
+
+    word_path = session["word_file"]
+    # Get the original PDF filename from session
+    pdf_filename = session.get("pdf_filename", "converted")
+    # Create Word filename based on original PDF name
+    word_filename = f"{pdf_filename.rsplit('.', 1)[0]}.docx"
+
+    return send_file(
+        word_path,
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        as_attachment=True,
+        download_name=word_filename,
+    )
+
+
+# =====================================
+# Word to PDF Conversion
+# =====================================
+@app.route("/word_to_pdf", methods=["GET", "POST"])
+def word_to_pdf():
+    """Convert Word to PDF"""
+    if request.method == "POST":
+        # Check if file part exists
+        if "file" not in request.files:
+            flash("No file selected", "danger")
+            return redirect(request.url)
+
+        file = request.files["file"]
+
+        # Check if filename is empty
+        if file.filename == "":
+            flash("No file selected", "danger")
+            return redirect(request.url)
+
+        # Check if file is allowed
+        if file and allowed_file(file.filename, "word"):
+            # Create a unique session ID
+            session_id = session.get("session_id", str(uuid.uuid4()))
+            session["session_id"] = session_id
+
+            # Save the file
+            if file.filename:
+                filename = secure_filename(file.filename)
+                word_path = os.path.join(TEMP_FOLDER, f"{session_id}_{filename}")
+                file.save(word_path)
+            else:
+                flash("No file selected", "danger")
+                return redirect(request.url)
+
+            try:
+                # Convert Word to PDF using python-docx and reportlab
+                pdf_path = os.path.join(
+                    GENERATED_PDFS_FOLDER,
+                    f"{session_id}_{filename.rsplit('.', 1)[0]}.pdf",
+                )
+                success = convert_word_to_pdf(word_path, pdf_path)
+
+                if success:
+                    session["converted_pdf_file"] = pdf_path
+                    return redirect(url_for("download_converted_pdf"))
+                else:
+                    flash("Error converting Word to PDF", "danger")
+                    return redirect(request.url)
+            except Exception as e:
+                logger.error(f"Error converting Word: {str(e)}")
+                flash(f"Error converting Word: {str(e)}", "danger")
+                return redirect(request.url)
+        else:
+            flash("Invalid file type. Allowed types: docx, doc", "warning")
+            return redirect(request.url)
+
+    return render_template("word_to_pdf.html")
+
+
+# =====================================
+# Template Builder
+# =====================================
+@app.route("/template_builder")
+def template_builder():
+    """Template Builder page"""
+    return render_template("template_builder.html")
+
+
+@app.route("/save_template", methods=["POST"])
+def save_template():
+    """Save custom template"""
+    data = request.json
+    if not data:
+        return jsonify({"error": "No template data provided"}), 400
+
+    try:
+        session_id = session.get("session_id", str(uuid.uuid4()))
+        session["session_id"] = session_id
+
+        template_name = data.get("name", f"template_{session_id}")
+        template_items = data.get("items", [])
+
+        # Save template
+        template_path = os.path.join(
+            TEMPLATES_FOLDER, f"{session_id}_{template_name}.json"
+        )
+
+        with open(template_path, "w") as f:
+            import json
+
+            json.dump(template_items, f)
+
+        # Generate preview PDF
+        preview_path = os.path.join(
+            GENERATED_PDFS_FOLDER, f"{session_id}_{template_name}_preview.pdf"
+        )
+        generate_template_preview(template_items, preview_path)
+
+        session["template_file"] = template_path
+        session["template_preview"] = preview_path
+
+        return jsonify(
+            {
+                "success": True,
+                "message": "Template saved successfully",
+                "preview_url": f"/view_pdf/{session_id}/{os.path.basename(preview_path)}",
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error saving template: {str(e)}")
+        return jsonify({"error": f"Error saving template: {str(e)}"}), 500
+
+
+# =====================================
+# Utility Routes
+# =====================================
+@app.route("/view_pdf/<session_id>/<path:filename>")
+def view_pdf(session_id, filename):
+    """View PDF file"""
+    # Check if file is from PDF folder
+    pdf_path = os.path.join(GENERATED_PDFS_FOLDER, f"{session_id}_{filename}")
+
+    if not os.path.exists(pdf_path):
+        # Check if file is from generated PDFs folder
+        pdf_path = os.path.join(GENERATED_PDFS_FOLDER, session_id, filename)
+
+        if not os.path.exists(pdf_path):
+            logger.error(f"PDF not found: {pdf_path}")
+            return jsonify({"error": "PDF file not found"}), 404
+
+    try:
+        return send_file(pdf_path, mimetype="application/pdf")
+    except Exception as e:
+        logger.error(f"Error sending PDF: {str(e)}")
+        return jsonify({"error": f"Error serving PDF: {str(e)}"}), 500
+
+
+@app.route("/download_all_pdfs")
+def download_all_pdfs():
+    """Download all generated PDFs as zip"""
+    session_id = session.get("session_id")
+    if not session_id:
+        flash("No session found", "warning")
+        return redirect(url_for("index"))
+
+    # Path to file containing PDF paths
+    paths_file = os.path.join(TEMP_FOLDER, f"{session_id}_pdf_paths.txt")
+
+    if not os.path.exists(paths_file):
+        flash("No PDFs have been generated yet", "warning")
+        return redirect(url_for("index"))
+
+    try:
+        # Read PDF paths
+        with open(paths_file, "r") as f:
+            pdf_paths = f.read().splitlines()
+
+        # Create a BytesIO object
+        memory_file = BytesIO()
+
+        # Create zip file
+        with zipfile.ZipFile(memory_file, "w") as zf:
+            pdf_folder = os.path.join(GENERATED_PDFS_FOLDER, session_id)
+
+            for pdf_path in pdf_paths:
+                full_path = os.path.join(pdf_folder, pdf_path)
+                if os.path.exists(full_path):
+                    zf.write(full_path, pdf_path)
+
+        # Reset file pointer
+        memory_file.seek(0)
+
+        # Create timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # Return zip file
+        return send_file(
+            memory_file,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"bank_statements_{timestamp}.zip",
+        )
+    except Exception as e:
+        logger.error(f"Error creating zip: {str(e)}")
+        flash(f"Error creating zip file: {str(e)}", "danger")
+        return redirect(url_for("index"))
+
+
+@app.route("/download_converted_pdf")
+def download_converted_pdf():
+    """Download converted PDF file"""
+    if "converted_pdf_file" not in session:
+        flash("No converted PDF file available", "warning")
+        return redirect(url_for("index"))
+
+    pdf_path = session["converted_pdf_file"]
+    filename = os.path.basename(pdf_path)
+
+    return send_file(
+        pdf_path, mimetype="application/pdf", as_attachment=True, download_name=filename
+    )
+
+
+@app.route("/show_progress/<job_type>")
+def show_progress(job_type):
+    """Show progress page for a job"""
+    return render_template("progress.html", job_type=job_type)
+
+
+def cleanup_uploads_folder():
+    """Clean up temporary files in the uploads folder while preserving important data"""
+    try:
+        # Files to preserve (case-insensitive)
+        preserve_files = {
+            "NotoNaskhArabic-Regular.ttf",
+            "times.ttf",
+            "platinum.pdf",
+            "Corporate.pdf",
+            "Business.pdf",
+            "ISIC.pdf",
+            "ITIC.pdf",
+            "IYTC.pdf",
+            "cardcollection.pdf",
+        }
+
+        # Directories to preserve
+        preserve_dirs = {
+            os.path.join(PROJECT_FOLDER, "static", "card_templates"),
+            os.path.join(PROJECT_FOLDER, "static", "assets"),
+        }
+
+        # Only clean specific temporary directories
+        temp_dirs = [
+            os.path.join(UPLOAD_FOLDER, "temp"),
+            os.path.join(UPLOAD_FOLDER, "pdf"),
+        ]
+
+        logger.info("Starting cleanup of temporary files...")
+
+        # Clean temporary directories
+        for directory in temp_dirs:
+            if os.path.exists(directory):
+                logger.info(f"Cleaning directory: {directory}")
+                for filename in os.listdir(directory):
+                    file_path = os.path.join(directory, filename)
+                    try:
+                        # Skip if file should be preserved
+                        if os.path.basename(file_path).lower() in {
+                            f.lower() for f in preserve_files
+                        }:
+                            logger.info(f"Preserving file: {file_path}")
+                            continue
+
+                        # Skip if directory should be preserved
+                        if any(
+                            os.path.commonpath([file_path]) == os.path.commonpath([d])
+                            for d in preserve_dirs
+                        ):
+                            logger.info(f"Preserving directory: {file_path}")
+                            continue
+
+                        # Delete temporary files and directories
+                        if os.path.isfile(file_path):
+                            os.unlink(file_path)
+                            logger.info(f"Deleted temporary file: {file_path}")
+                        elif os.path.isdir(file_path):
+                            import shutil
+
+                            shutil.rmtree(file_path)
+                            logger.info(f"Deleted temporary directory: {file_path}")
+                    except Exception as e:
+                        logger.error(f"Error processing {file_path}: {str(e)}")
+
+        logger.info("Cleanup of temporary files completed successfully")
+    except Exception as e:
+        logger.error(f"Error during cleanup: {str(e)}")
+
+
+@app.route("/download/<filename>")
+def download_file(filename):
+    """Download a generated file (ZIP or PDF) and clean up temporary files afterward"""
+    session_id = session.get("session_id")
+    if not session_id:
+        flash("Session expired. Please try again.", "warning")
+        return redirect(url_for("index"))
+
+    # For ZIP files
+    if filename.endswith(".zip"):
+        # Check if zip_filename is in session
+        if "zip_filename" in session and session["zip_filename"] == filename:
+            # File should be in TEMP_FOLDER
+            file_path = os.path.join(TEMP_FOLDER, filename)
+
+            # If file not found, try to get path from zip_info file
+            if not os.path.exists(file_path):
+                zip_info_path = os.path.join(TEMP_FOLDER, f"{session_id}_zip_info.txt")
+                if os.path.exists(zip_info_path):
+                    with open(zip_info_path, "r") as f:
+                        file_path = f.read().strip()
+
+            if os.path.exists(file_path):
+                response = send_file(
+                    file_path,
+                    mimetype="application/zip",
+                    as_attachment=True,
+                    download_name=filename,
+                )
+
+                # Clean up only temporary files after sending
+                @response.call_on_close
+                def cleanup():
+                    cleanup_uploads_folder()
+
+                return response
+
+    # For PDF files
+    elif filename.endswith(".pdf"):
+        # Check the GENERATED_PDFS_FOLDER for files matching session_id
+        pdf_folder = os.path.join(GENERATED_PDFS_FOLDER, session_id)
+        if os.path.exists(pdf_folder):
+            # Look for the specific file
+            for file in os.listdir(pdf_folder):
+                if file == filename:
+                    file_path = os.path.join(pdf_folder, file)
+                    response = send_file(
+                        file_path,
+                        mimetype="application/pdf",
+                        as_attachment=True,
+                        download_name=filename,
+                    )
+
+                    # Clean up only temporary files after sending
+                    @response.call_on_close
+                    def cleanup():
+                        cleanup_uploads_folder()
+
+                    return response
+
+    # If all checks fail
+    flash("Requested file not found", "danger")
+    return redirect(url_for("index"))
+
+
+@app.route("/clear_session")
+def clear_session():
+    """Clear session data"""
+    session_id = session.get("session_id")
+
+    if session_id:
+        # Clean up session files
+        try:
+            # Clear temporary files
+            for folder in [GENERATED_PDFS_FOLDER, TEMP_FOLDER]:
+                for filename in os.listdir(folder):
+                    if filename.startswith(f"{session_id}_"):
+                        os.remove(os.path.join(folder, filename))
+
+            # Clear generated PDFs folder
+            pdf_folder = os.path.join(GENERATED_PDFS_FOLDER, session_id)
+            if os.path.exists(pdf_folder):
+                import shutil
+
+                shutil.rmtree(pdf_folder)
+
+            # Remove from progress tracker
+            if session_id in progress_tracker:
+                del progress_tracker[session_id]
+        except Exception as e:
+            logger.error(f"Error cleaning up session: {str(e)}")
+
+    # Clear session data
+    session.clear()
+
+    flash("Session cleared successfully", "success")
+    return redirect(url_for("index"))
+
+
+# =====================================
+# PDF and Conversion Functions
+# =====================================
+def generate_pdf_from_row(row, output_path):
+    """Generate a PDF bank statement from a row of data"""
+    try:
+        # Create PDF document
+        doc = SimpleDocTemplate(output_path, pagesize=letter)
+        elements = []
+
+        # Styles
+        styles = getSampleStyleSheet()
+        styles.add(ParagraphStyle(name="Center", alignment=1))
+
+        # Header
+        header_text = "Bank Statement"
+        elements.append(Paragraph(header_text, styles["Title"]))
+        elements.append(Spacer(1, 12))
+
+        # Date
+        date_text = f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        elements.append(Paragraph(date_text, styles["Normal"]))
+        elements.append(Spacer(1, 20))
+
+        # Customer info
+        customer_info = []
+        for key, value in row.items():
+            # Format key for display
+            display_key = key.replace("_", " ").title()
+
+            # Format value - handle both numeric and string values
+            if pd.isna(value):
+                display_value = ""
+            elif isinstance(value, (int, float)):
+                if "amount" in key.lower() or "balance" in key.lower():
+                    display_value = f"${value:.2f}"
+                else:
+                    display_value = str(value)
+            else:
+                display_value = str(value)
+
+                # Apply Arabic/Kurdish text formatting if needed
+                if any("\u0600" <= char <= "\u06ff" for char in display_value):
+                    display_value = format_arabic_text(display_value)
+
+            customer_info.append((display_key, display_value))
+
+        # Create customer info table
+        if customer_info:
+            from reportlab.lib.units import inch
+
+            customer_table = Table(customer_info, colWidths=[2 * inch, 4 * inch])
+            customer_table.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                        ("PADDING", (0, 0), (-1, -1), 6),
+                    ]
+                )
+            )
+            elements.append(customer_table)
+            elements.append(Spacer(1, 20))
+
+        # Add footer
+        footer_text = "This is an official bank statement. For any inquiries, please contact our customer service."
+        elements.append(Paragraph(footer_text, styles["Italic"]))
+
+        # Build PDF
+        doc.build(elements)
+
+        return output_path
+    except Exception as e:
+        logger.error(f"Error generating PDF: {str(e)}")
+        raise
+
+
+def edit_pdf_file(input_path, output_path, edits):
+    """Apply edits to a PDF file"""
+    try:
+        # Read the original PDF
+        pdf_reader = PdfReader(input_path)
+        pdf_writer = PdfWriter()
+
+        # Process each page
+        for i in range(len(pdf_reader.pages)):
+            page = pdf_reader.pages[i]
+            page_edits = [edit for edit in edits if edit.get("page", 0) == i]
+
+            if page_edits:
+                # Create overlay with edits
+                packet = BytesIO()
+                can = canvas.Canvas(packet, pagesize=letter)
+
+                # Apply each edit
+                for edit in page_edits:
+                    edit_type = edit.get("type", "")
+                    position = edit.get("position", [0, 0])
+                    content = edit.get("content", "")
+
+                    if edit_type == "text":
+                        # Add text
+                        font_size = edit.get("fontSize", 12)
+                        can.setFont("Arial", font_size)
+                        can.setFillColor(colors.black)
+                        can.drawString(position[0], position[1], content)
+
+                    elif edit_type == "highlight":
+                        # Add highlight
+                        width = edit.get("width", 100)
+                        height = edit.get("height", 20)
+                        can.setFillColorRGB(1, 1, 0, 0.3)
+                        can.rect(
+                            position[0],
+                            position[1],
+                            width,
+                            height,
+                            fill=True,
+                            stroke=False,
+                        )
+
+                    elif edit_type == "strikethrough":
+                        # Add strikethrough
+                        width = edit.get("width", 100)
+                        can.setStrokeColor(colors.red)
+                        can.setLineWidth(1)
+                        can.line(
+                            position[0], position[1], position[0] + width, position[1]
+                        )
+                can.save()
+                # Merge overlay with page
+                packet.seek(0)
+                overlay = PdfReader(packet).pages[0]
+                page.merge_page(overlay)
+            # Add page to output
+            pdf_writer.add_page(page)
+        # Write output file
+        with open(output_path, "wb") as f:
+            pdf_writer.write(f)
+        return True
+    except Exception as e:
+        logger.error(f"Error editing PDF: {str(e)}")
+        raise
+
+
+def convert_pdf_to_word(pdf_path, word_path):
+    """Convert PDF to Word document with proper formatting"""
+    try:
+        doc = docx.Document()
+        reader = PdfReader(pdf_path)
+        for page_num, page in enumerate(reader.pages, 1):
+            doc.add_heading(f"Page {page_num}", level=1)
+            text = page.extract_text()
+            if text:
+                paragraphs = text.split("\n\n")
+                for para in paragraphs:
+                    if para.strip():
+                        p = doc.add_paragraph()
+                        p.add_run(para.strip())
+            else:
+                doc.add_paragraph("[No extractable text on this page]")
+            if page_num < len(reader.pages):
+                doc.add_page_break()
+        doc.save(word_path)
+        return True
+    except Exception as e:
+        logger.error(f"Error converting PDF to Word: {str(e)}")
+        return False
+
+
+def clean_paragraph_text(text):
+    # Remove all <...> tags
+    text = re.sub(r"<[^>]+>", "", text)
+    # Escape any remaining < or >
+    text = text.replace("<", "&lt;").replace(">", "&gt;")
+    return text
+
+
+def convert_word_to_pdf(word_path, pdf_path):
+    import docx  # Ensure docx is available in this scope
+
+    doc = docx.Document(word_path)
+    pdf = SimpleDocTemplate(pdf_path, pagesize=letter)
+    styles = getSampleStyleSheet()
+    elements = []
+    for para in doc.paragraphs:
+        clean_text = clean_paragraph_text(para.text)
+        if clean_text.strip():
+            elements.append(Paragraph(clean_text, styles["Normal"]))
+            elements.append(Spacer(1, 6))
+    pdf.build(elements)
+    return True
+
+
+def generate_template_preview(template_items, output_path):
+    """Generate a preview of a template"""
+    try:
+        # Create a PDF canvas
+        c = canvas.Canvas(output_path, pagesize=A4)
+        width, height = A4
+
+        # Add template items
+        for item in template_items:
+            item_type = item.get("type", "")
+            x = item.get("x", 0)
+            y = height - item.get(
+                "y", 0
+            )  # Adjust for PDF coordinates (origin at bottom left)
+
+            if item_type == "text":
+                text = item.get("text", "")
+                font_size = item.get("fontSize", 12)
+                c.setFont("Arial", font_size)
+                c.drawString(x, y, text)
+
+            elif item_type == "field":
+                field_name = item.get("fieldName", "")
+                font_size = item.get("fontSize", 12)
+                c.setFont("Arial", font_size)
+                c.setFillColor(colors.blue)
+                c.drawString(x, y, f"[{field_name}]")
+                c.setFillColor(colors.black)
+
+            elif item_type == "rect":
+                width = item.get("width", 100)
+                height = item.get("height", 50)
+                c.rect(x, y - height, width, height)
+
+        c.save()
+        return True
+    except Exception as e:
+        logger.error(f"Error generating template preview: {str(e)}")
+        return False
+
+
+def generate_pdfs_from_excel(
+    file_in_memory, session_id, excel_filename, card_type, template_in_memory=None
+):
+    print(f"Processing Excel file: {excel_filename}")
+    ensure_downloads_folder()
+    wb = load_workbook(file_in_memory)
+    sheet = wb.active
+    for row in range(sheet.max_row, 0, -1):
+        if all(cell.value is None for cell in sheet[row]):
+            sheet.delete_rows(row)
+    for col in range(sheet.max_column, 0, -1):
+        if all(cell.value is None for cell in sheet[get_column_letter(col)]):
+            sheet.delete_cols(col)
+    headers = []
+    for header in sheet[1]:
+        if header.value:
+            headers.append(str(header.value).strip().lower())  # Always lowercase
+        else:
+            headers.append("")
+    print("Headers in Excel file:", headers)
+    total_rows = max(sheet.max_row - 1, 1)
+    zip_filename = f"{os.path.splitext(excel_filename)[0]}.zip"
+    zip_filepath = os.path.join(app.config["GENERATED_PDFS_FOLDER"], zip_filename)
+    print(f"Generated ZIP file: {zip_filepath}")
+    try:
+        with zipfile.ZipFile(zip_filepath, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for idx, row in enumerate(
+                sheet.iter_rows(min_row=2, values_only=True), start=1
+            ):
+                if not any(cell for cell in row):
+                    print(f"Skipping empty row {idx}")
+                    continue
+                # Robust row_dict creation
+                row_dict = {
+                    headers[i].lower(): (
+                        str(row[i]).strip()
+                        if i < len(row) and row[i] is not None
+                        else ""
+                    )
+                    for i in range(len(headers))
+                }
+                mapped_row = {}
+                # Map fields using case-insensitive comparison
+                for k, v in row_dict.items():
+                    k_lower = k.lower()
+                    mapped_key = HEADER_TO_FIELD.get(k_lower, k_lower)
+                    mapped_row[mapped_key] = v
+                # Debug print for mapping
+                print(f"[DEBUG] Row {idx} mapped_row: {mapped_row}")
+                field_order = FIELD_ORDERS.get(card_type, [])
+                name = mapped_row.get("name", "")
+                if not name:
+                    name = mapped_row.get("cardholder name", "")
+                last_digits = mapped_row.get("last four digits", "")
+                if not last_digits:
+                    last_digits = mapped_row.get("card last digits", "")
+                name_clean = secure_filename(name.replace(" ", "_"))
+                pdf_filename = f"{name_clean.replace('_', ' ')} , {last_digits}.pdf"
+                temp_pdf_path = os.path.join(
+                    app.config["GENERATED_PDFS_FOLDER"], f"temp_{pdf_filename}"
+                )
+                # Use mapped_row for PDF generation
+                generate_pdf_for_card_type(mapped_row, temp_pdf_path, card_type)
+                zipf.write(temp_pdf_path, pdf_filename)
+                try:
+                    if os.path.exists(temp_pdf_path):
+                        os.remove(temp_pdf_path)
+                except Exception as e:
+                    print(
+                        f"Warning: Could not delete temporary file {temp_pdf_path}: {e}"
+                    )
+                progress = int((idx / total_rows) * 100)
+                update_progress(session_id, progress)
+        update_progress(session_id, 100)
+        return zip_filename
+    except Exception as e:
+        print(f"Error creating ZIP file: {e}")
+        try:
+            if os.path.exists(zip_filepath):
+                os.remove(zip_filepath)
+        except Exception as cleanup_error:
+            print(f"Error cleaning up ZIP file: {cleanup_error}")
+        raise
+
+
+# =====================================
+# Error Handling
+# =====================================
+@app.errorhandler(404)
+def page_not_found(e):
+    """Handle 404 errors"""
+    return render_template("error.html", error="Page not found"), 404
+
+
+@app.errorhandler(500)
+def internal_server_error(e):
+    """Handle 500 errors"""
+    return render_template("error.html", error="Internal server error"), 500
+
+
+@app.route("/card_collection_preview", methods=["GET", "POST"])
+def card_collection_preview():
+    if request.method == "POST":
+        if "file" not in request.files:
+            flash("Please upload an Excel file", "danger")
+            return redirect(request.url)
+        excel_file = request.files["file"]
+        if excel_file.filename == "":
+            flash("Please select an Excel file", "danger")
+            return redirect(request.url)
+        if excel_file and allowed_file(excel_file.filename, "excel"):
+            try:
+                session_id = session.get("session_id", str(uuid.uuid4()))
+                session["session_id"] = session_id
+                # Always use the static cardcollection.pdf template
+                template_path = os.path.join(
+                    PROJECT_FOLDER, "static", "card_templates", "cardcollection.pdf"
+                )
+                df = pd.read_excel(excel_file)
+                data = df.to_dict("records")
+                columns = df.columns.tolist()
+                excel_path = os.path.join(UPLOAD_FOLDER, f"{session_id}_data.xlsx")
+                excel_file.save(excel_path)
+                session["excel_file"] = excel_path
+                card_type = request.form.get("card_type", "a4")
+                session["card_type"] = card_type
+                if data:
+                    preview_pdf_path = os.path.join(
+                        GENERATED_PDFS_FOLDER, f"{session_id}_preview.pdf"
+                    )
+                    generate_pdf_for_card_type(
+                        data[0],
+                        preview_pdf_path,
+                        card_type=card_type,
+                        template_path=template_path,
+                    )
+                    session["preview_pdf"] = preview_pdf_path
+                return render_template(
+                    "card_collection_preview.html",
+                    data=data,
+                    columns=columns,
+                    preview_pdf=f"/view_pdf/{session_id}/preview.pdf",
+                    card_type=card_type,
+                )
+            except Exception as e:
+                logger.error(f"Error processing files: {str(e)}")
+                flash(f"Error processing files: {str(e)}", "danger")
+                return redirect(request.url)
+        else:
+            flash(
+                "Invalid file type. Please upload Excel (.xlsx, .xls) file", "warning"
+            )
+            return redirect(request.url)
+    return render_template("card_collection_preview.html", data=None, columns=None)
+
+
+@app.route("/generate_collection_pdfs", methods=["POST"])
+def generate_collection_pdfs():
+    """Generate PDFs from Excel data using the static cardcollection.pdf template, using platinum field order."""
+    if "excel_file" not in session:
+        flash("Please upload an Excel file first", "warning")
+        return redirect(url_for("card_collection_preview"))
+    try:
+        session_id = session["session_id"]
+        card_type = (
+            "platinum"  # Always use platinum field order for static card collection
+        )
+        df = pd.read_excel(session["excel_file"])
+        # Always use the static cardcollection.pdf template
+        template_path = os.path.join(
+            PROJECT_FOLDER, "static", "card_templates", "cardcollection.pdf"
+        )
+        output_folder = os.path.join(GENERATED_PDFS_FOLDER, session_id)
+        os.makedirs(output_folder, exist_ok=True)
+        pdf_paths = []
+        total_rows = len(df)
+        for i, row in df.iterrows():
+            name = str(row.get("name", row.get("cardholder name", f"card_{i}")))
+            last_digits = str(
+                row.get("last four digits", row.get("card last digits", ""))
+            )
+            name_clean = secure_filename(name.replace(" ", "_"))
+            pdf_filename = f"{name_clean} , {last_digits}.pdf"
+            pdf_path = os.path.join(output_folder, pdf_filename)
+            mapped_row = {k.lower(): v for k, v in row.to_dict().items()}
+            # Use only the four fields for cardcollection, in this order
+            field_order = [
+                "last four digits",
+                "delivery address",
+                "phone number",
+                "name",
+            ]
+            values = [mapped_row.get(k, "") for k in field_order]
+            logger.info(
+                f"[CARD_COLLECTION] Using values for dash replacement: {values}"
+            )
+            # Overlay data onto dashes in the static template
+            replace_dashes_in_pdf(template_path, pdf_path, values)
+            pdf_paths.append(pdf_filename)
+            progress = int((i + 1) / total_rows * 100)
+            update_progress(session_id, progress)
+        zip_filename = f"card_collection_{session_id}.zip"
+        zip_path = os.path.join(TEMP_FOLDER, zip_filename)
+        with zipfile.ZipFile(zip_path, "w") as zipf:
+            for pdf_path in pdf_paths:
+                full_path = os.path.join(output_folder, pdf_path)
+                if os.path.exists(full_path):
+                    zipf.write(full_path, pdf_path)
+        session["zip_filename"] = zip_filename
+        update_progress(session_id, 100)
+        return jsonify(
+            {
+                "success": True,
+                "message": "PDFs generated successfully",
+                "download_url": url_for("download_file", filename=zip_filename),
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error generating PDFs: {str(e)}")
+        update_progress(session_id, -1)
+        return (
+            jsonify({"success": False, "message": f"Error generating PDFs: {str(e)}"}),
+            500,
+        )
+
+
+# =====================================
+# Simple Excel Table to PDF Conversion
+# =====================================
+@app.route("/simple_excel_to_pdf", methods=["GET", "POST"])
+def simple_excel_to_pdf():
+    """Convert Excel file to PDF with table (no mapping, just as-is)"""
+    if request.method == "POST":
+        if "file" not in request.files:
+            flash("No file selected", "danger")
+            return redirect(request.url)
+        file = request.files["file"]
+        if file.filename == "":
+            flash("No file selected", "danger")
+            return redirect(request.url)
+        if file and allowed_file(file.filename, "excel"):
+            session_id = session.get("session_id", str(uuid.uuid4()))
+            session["session_id"] = session_id
+            filename = secure_filename(file.filename)
+            excel_path = os.path.join(UPLOAD_FOLDER, f"{session_id}_simple_{filename}")
+            file.save(excel_path)
+            try:
+                pdf_filename = os.path.splitext(filename)[0] + ".pdf"
+                pdf_path = os.path.join(
+                    GENERATED_PDFS_FOLDER, f"{session_id}_{pdf_filename}"
+                )
+                excel_table_to_pdf(excel_path, pdf_path)
+                session["simple_pdf_file"] = pdf_path
+                session["simple_pdf_name"] = pdf_filename
+                flash("Excel table successfully converted to PDF", "success")
+                return redirect(url_for("download_simple_pdf"))
+            except Exception as e:
+                logger.error(f"Error converting Excel to PDF: {str(e)}")
+                flash(f"Error converting Excel to PDF: {str(e)}", "danger")
+                return redirect(request.url)
+        else:
+            flash("Invalid file type. Allowed types: xlsx, xls", "warning")
+            return redirect(request.url)
+    return render_template("simple_excel_to_pdf.html")
+
+
+@app.route("/download_simple_pdf")
+def download_simple_pdf():
+    """Download the simple Excel table PDF"""
+    if "simple_pdf_file" not in session:
+        flash("No converted PDF file available", "warning")
+        return redirect(url_for("simple_excel_to_pdf"))
+    pdf_path = session["simple_pdf_file"]
+    filename = session.get("simple_pdf_name", os.path.basename(pdf_path))
+    return send_file(
+        pdf_path, mimetype="application/pdf", as_attachment=True, download_name=filename
+    )
+
+
+def kurdish_to_arabic_chars(text):
+    """Replace Kurdish-specific chars with Arabic equivalents. For 'ە' inside a word, change to Arabic 'ه' and add a space if not followed by a space. If 'ە' is a separate word or followed by a space, keep it as is."""
+    if not isinstance(text, str):
+        return text
+    # Kurdish 'ێ' (U+06CE) -> Arabic 'ي' (U+064A)
+    text = text.replace("\u06ce", "\u064a")
+    import re
+
+    # Replace 'ە' inside a word (not surrounded by spaces)
+    def replace_inside_word(match):
+        next_char = match.group(2)
+        if next_char == " ":
+            return "\u0647 "
+        else:
+            return "\u0647 "
+
+    # Only replace 'ە' that is not already followed by a space
+    text = re.sub(r"(?<! )\u06d5([^ ])", lambda m: "\u0647 " + m.group(1), text)
+    return text
+
+
+def excel_table_to_pdf(excel_path, pdf_path):
+    """Convert an Excel file to a PDF with a table (all rows/columns), supporting Kurdish, Arabic, and English."""
+    import pandas as pd
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Spacer
+    from reportlab.lib import colors
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.pdfbase import pdfmetrics
+    import os
+
+    df = pd.read_excel(excel_path)
+    PROJECT_FOLDER = os.path.dirname(os.path.abspath(__file__))
+    font_path = os.path.join(PROJECT_FOLDER, "NotoNaskhArabic-Regular.ttf")
+    font_name = "NotoNaskhArabic"
+    if os.path.exists(font_path):
+        pdfmetrics.registerFont(TTFont(font_name, font_path))
+    else:
+        font_name = "Helvetica"  # fallback
+
+    def format_cell(val):
+        try:
+            from bidi.algorithm import get_display
+            from arabic_reshaper import reshape
+        except ImportError:
+            return str(val)
+        if val is None:
+            return ""
+        s = str(val)
+        s = kurdish_to_arabic_chars(s)
+        if any("\u0600" <= c <= "\u06ff" for c in s):
+            try:
+                reshaped = reshape(s)
+                return get_display(reshaped)
+            except Exception:
+                return s
+        return s
+
+    data = [[format_cell(col) for col in df.columns.tolist()]]
+    for row in df.values.tolist():
+        data.append([format_cell(cell) for cell in row])
+    doc = SimpleDocTemplate(pdf_path, pagesize=A4)
+    elements = []
+    table = Table(data, repeatRows=1)
+    table.setStyle(
+        TableStyle(
+            [
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("FONTNAME", (0, 0), (-1, -1), font_name),
+                ("FONTSIZE", (0, 0), (-1, 0), 12),
+                ("FONTSIZE", (0, 1), (-1, -1), 10),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 10),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ]
+        )
+    )
+    elements.append(table)
+    elements.append(Spacer(1, 12))
+    doc.build(elements)
+
+
+if __name__ == "__main__":
+    # Create required directories if they don't exist
+    for folder in [UPLOAD_FOLDER, TEMPLATES_FOLDER, GENERATED_PDFS_FOLDER, TEMP_FOLDER]:
+        os.makedirs(folder, exist_ok=True)
+
+    # Get configuration from environment variables
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", 5048))
+    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+
+    try:
+        app.run(host=host, port=port, debug=debug)
+    finally:
+        # Shutdown the scheduler when the app stops
+        scheduler.shutdown()

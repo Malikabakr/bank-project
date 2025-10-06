@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+
+{% block title %}Home{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-10">
+        <div class="card shadow">
+            <div class="card-body text-center p-5">
+                <h1 class="display-4 mb-4">
+                    <i class="fas fa-file-invoice-dollar text-primary me-3"></i>
+                    PDFMakerPro
+                </h1>
+                <p class="lead">Professional card delivery PDF generation from Excel data.</p>
+
+                {% if error %}
+                <div class="alert alert-danger mt-4">
+                    <strong>Error:</strong> {{ error }}
+                </div>
+                {% endif %}
+
+                <hr class="my-4">
+
+                <div class="row justify-content-center">
+                    <div class="col-md-6">
+                        <div class="card shadow mb-4 border-primary">
+                            <div class="card-body text-center p-5">
+                                <i class="fas fa-credit-card fa-5x text-primary mb-4"></i>
+                                <h3 class="card-title mb-3">Card Form Selection</h3>
+                                <p class="card-text lead mb-4">Generate customized PDFs for various bank card types from
+                                    Excel data.</p>
+                                <a href="{{ url_for('card_selection') }}" class="btn btn-primary btn-lg px-5">
+                                    <i class="fas fa-arrow-right me-2"></i> Choose Card Type
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card shadow mb-4 border-success">
+                            <div class="card-body text-center p-5">
+                                <i class="fas fa-table fa-5x text-success mb-4"></i>
+                                <h3 class="card-title mb-3">Excel Table to PDF</h3>
+                                <p class="card-text lead mb-4">Convert Excel tables directly to PDF format for reports
+                                    and documentation.</p>
+                                <a href="{{ url_for('simple_excel_to_pdf') }}" class="btn btn-success btn-lg px-5">
+                                    <i class="fas fa-arrow-right me-2"></i> Convert Table
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow mt-4">
+            <div class="card-body">
+                <h3 class="mb-4 text-center">How It Works</h3>
+                <div class="row">
+                    <div class="col-md-4 text-center">
+                        <div class="border rounded p-4 mb-3 h-100">
+                            <i class="fas fa-file-excel fa-3x text-success mb-3"></i>
+                            <h5 class="fw-bold">Step 1: Upload Excel</h5>
+                            <p class="text-muted">Upload your Excel file with customer data</p>
+                        </div>
+                    </div>
+                    <div class="col-md-4 text-center">
+                        <div class="border rounded p-4 mb-3 h-100">
+                            <i class="fas fa-magic fa-3x text-primary mb-3"></i>
+                            <h5 class="fw-bold">Step 2: Auto-Generate</h5>
+                            <p class="text-muted">System automatically generates personalized PDFs</p>
+                        </div>
+                    </div>
+                    <div class="col-md-4 text-center">
+                        <div class="border rounded p-4 mb-3 h-100">
+                            <i class="fas fa-download fa-3x text-danger mb-3"></i>
+                            <h5 class="fw-bold">Step 3: Download</h5>
+                            <p class="text-muted">Download all PDFs as a single ZIP file</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="alert alert-info mt-4 text-center">
+                    <i class="fas fa-shield-alt me-2"></i>
+                    <strong>PCI DSS Compliant:</strong> All files are automatically deleted after 2 minutes
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

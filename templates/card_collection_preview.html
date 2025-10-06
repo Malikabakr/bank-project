@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+
+{% block title %}Card Collection Data Preview{% endblock %}
+
+{% block head %}
+    {{ super() }}
+    <style>
+        .pdf-preview {
+            width: 100%;
+            height: 500px;
+            border: 1px solid #dee2e6;
+        }
+        .preview-container {
+            position: relative;
+            margin-bottom: 20px;
+        }
+        .preview-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        .preview-text {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #000;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2 class="mb-4">Card Collection Preview</h2>
+    
+    <!-- File Upload Form -->
+    <form method="POST" enctype="multipart/form-data" class="mb-4">
+        <div class="row">
+            <div class="col-md-6">
+                <div class="form-group">
+                    <label for="file">Upload Excel File</label>
+                    <input type="file" class="form-control" id="file" name="file" accept=".xlsx,.xls" required>
+                </div>
+            </div>
+        </div>
+        <div class="row mt-3">
+            <div class="col-md-6">
+                <div class="form-group">
+                    <label for="card_type">Select Card Type</label>
+                    <select class="form-control" id="card_type" name="card_type" required>
+                        <option value="a4" {% if card_type == 'a4' %}selected{% endif %}>A4</option>
+                        <option value="visa" {% if card_type == 'visa' %}selected{% endif %}>Visa</option>
+                        <option value="mastercard" {% if card_type == 'mastercard' %}selected{% endif %}>Mastercard</option>
+                        <option value="amex" {% if card_type == 'amex' %}selected{% endif %}>American Express</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary mt-3">Upload and Preview</button>
+    </form>
+
+    {% if data %}
+    <div class="row">
+        <!-- Excel Data Preview -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Excel Data Preview (First 5 Rows)</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    {% for column in columns %}
+                                    <th>{{ column }}</th>
+                                    {% endfor %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in data[:5] %}
+                                <tr>
+                                    {% for column in columns %}
+                                    <td>{{ row[column] }}</td>
+                                    {% endfor %}
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- PDF Preview -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">PDF Preview</h5>
+                </div>
+                <div class="card-body">
+                    <div class="pdf-preview-container">
+                        <canvas id="pdf-canvas"></canvas>
+                        <div id="previewOverlay" class="preview-overlay"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generate PDFs Button -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <button id="generatePdfsBtn" class="btn btn-success">Generate All PDFs</button>
+            <div id="progressContainer" class="mt-3" style="display: none;">
+                <div class="progress">
+                    <div id="progressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                </div>
+                <p id="progressText" class="mt-2">Generating PDFs...</p>
+            </div>
+            <div id="downloadContainer" class="mt-3" style="display: none;">
+                <a id="downloadLink" href="#" class="btn btn-primary">Download Generated PDFs</a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+.pdf-preview-container {
+    position: relative;
+    width: 100%;
+    height: 500px;
+    overflow: auto;
+    border: 1px solid #ddd;
+}
+
+#pdf-canvas {
+    width: 100%;
+    height: 100%;
+}
+
+.preview-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+</style>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const generatePdfsBtn = document.getElementById('generatePdfsBtn');
+    const progressContainer = document.getElementById('progressContainer');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    const downloadContainer = document.getElementById('downloadContainer');
+    const downloadLink = document.getElementById('downloadLink');
+
+    // Handle PDF generation
+    generatePdfsBtn.addEventListener('click', function() {
+        generatePdfsBtn.disabled = true;
+        progressContainer.style.display = 'block';
+        progressBar.style.width = '0%';
+        progressText.textContent = 'Generating PDFs...';
+
+        fetch('/generate_collection_pdfs', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                progressBar.style.width = '100%';
+                progressText.textContent = 'PDFs generated successfully!';
+                downloadContainer.style.display = 'block';
+                downloadLink.href = data.download_url;
+            } else {
+                progressText.textContent = 'Error: ' + data.message;
+            }
+        })
+        .catch(error => {
+            progressText.textContent = 'Error: ' + error.message;
+        })
+        .finally(() => {
+            generatePdfsBtn.disabled = false;
+        });
+    });
+});
+</script>
+{% endblock %} 

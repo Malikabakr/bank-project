@@ -1,0 +1,138 @@
+{% extends 'form_base.html' %}
+
+{% block form_title %}A4 Statement Generator{% endblock %}
+{% block breadcrumb_title %}A4 Statement{% endblock %}
+
+{% block card_type %}a4{% endblock %}
+{% block header_class %}bg-primary{% endblock %}
+{% block submit_button_class %}btn-primary{% endblock %}
+{% block progress_bar_class %}bg-primary{% endblock %}
+
+{% block card_icon %}<i class="fas fa-file-alt fa-2x"></i>{% endblock %}
+{% block card_title %}A4 Statement Generator{% endblock %}
+{% block card_subtitle %}Custom template statements{% endblock %}
+
+{% block card_description %}
+<p class="lead mb-4">
+    Generate A4-sized bank statements from your Excel data. Upload your own custom PDF template or use our default design.
+</p>
+{% endblock %}
+
+{% block template_upload %}
+<!-- Only keep the Excel file upload field. Remove the PDF template upload field and its label, input, and any related help text. -->
+{% endblock %}
+
+{% block info_title %}A4 Template Features{% endblock %}
+
+{% block card_info %}
+<p>The A4 template format provides maximum flexibility:</p>
+<div class="row mt-4">
+    <div class="col-md-6">
+        <ul class="list-group list-group-flush">
+            <li class="list-group-item">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                Full A4 size (210 × 297 mm) layout
+            </li>
+            <li class="list-group-item">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                Support for custom PDF template overlay
+            </li>
+            <li class="list-group-item">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                Detailed transaction data
+            </li>
+        </ul>
+    </div>
+    <div class="col-md-6">
+        <ul class="list-group list-group-flush">
+            <li class="list-group-item">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                Bank logo and branding options
+            </li>
+            <li class="list-group-item">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                Custom headers and footers
+            </li>
+            <li class="list-group-item">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                Professional full-page statement design
+            </li>
+        </ul>
+    </div>
+</div>
+
+<div class="mt-4">
+    <h5>Working with Custom Templates</h5>
+    <p>
+        When using your own template, the system will intelligently place data elements on the template. 
+        To ensure proper placement, your template should include clear areas for:
+    </p>
+    <ol>
+        <li>Account holder information (upper portion)</li>
+        <li>Transaction details (middle section)</li>
+        <li>Balance and summary (lower portion)</li>
+    </ol>
+</div>
+{% endblock %}
+
+{% block excel_columns %}
+<tr>
+    <td><code>Name</code></td>
+    <td>Account holder's name</td>
+    <td>John Smith</td>
+</tr>
+<tr>
+    <td><code>Account_Number</code></td>
+    <td>Bank account number</td>
+    <td>1234567890123456</td>
+</tr>
+<tr>
+    <td><code>Date</code></td>
+    <td>Statement date</td>
+    <td>12/25/2023</td>
+</tr>
+<tr>
+    <td><code>Transaction_Description</code></td>
+    <td>Description of transaction</td>
+    <td>Monthly Deposit</td>
+</tr>
+<tr>
+    <td><code>Amount</code></td>
+    <td>Transaction amount</td>
+    <td>1,250.00</td>
+</tr>
+<tr>
+    <td><code>Balance</code></td>
+    <td>Current balance</td>
+    <td>5,432.10</td>
+</tr>
+<tr>
+    <td><code>BankName</code> (optional)</td>
+    <td>Name of the bank</td>
+    <td>First National Bank</td>
+</tr>
+<tr>
+    <td><code>BranchCode</code> (optional)</td>
+    <td>Branch code or identifier</td>
+    <td>NYC-001</td>
+</tr>
+{% endblock %}
+
+{% block excel_notes %}
+<div class="alert alert-primary mt-3">
+    <i class="fas fa-info-circle me-2"></i>
+    <strong>Custom Template Tip:</strong> For best results with custom templates, ensure your template has clear areas where data should be placed. You can also upload a blank template with just your bank's branding and logo.
+</div>
+{% endblock %}
+
+{% block additional_scripts %}
+// Preview template when selected
+document.getElementById('pdfTemplate').addEventListener('change', function(e) {
+    if (this.files && this.files[0]) {
+        var fileLabel = this.nextElementSibling;
+        if (fileLabel) {
+            fileLabel.innerHTML = 'Selected template: ' + this.files[0].name;
+        }
+    }
+});
+{% endblock %}

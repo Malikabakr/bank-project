@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>First Iraqi Bank - Upload Excel for IYTC Card Form</title>
+    <style>
+        /* Reset default browser styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* Background Image */
+        body {
+            font-family: 'Arial', sans-serif;
+            color: #333;
+            background-image: url('https://www.example.com/first-iraqi-bank-bg.jpg');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            padding: 0;
+            margin: 0;
+            position: relative;
+        }
+
+        /* Transparency layer for readability */
+        .overlay {
+            background-color: rgba(0, 0, 0, 0.5);
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: -1;
+        }
+
+        /* Header Styling */
+        h1 {
+            font-size: 3rem;
+            color: white;
+            margin-bottom: 20px;
+            text-align: center;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .subheading {
+            font-size: 1.2rem;
+            color: #ffffff;
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .form-container {
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 700px;
+        }
+
+        /* Label and Input Styling */
+        label {
+            font-size: 1rem;
+            color: #0d47a1;
+            margin-bottom: 10px;
+            font-weight: bold;
+            display: block;
+        }
+
+        input[type="file"] {
+            width: 100%;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 8px;
+            border: 1px solid #0d47a1;
+            background-color: #fafafa;
+            font-size: 1rem;
+            color: #333;
+            transition: border-color 0.3s ease;
+        }
+
+        input[type="file"]:focus {
+            border-color: #0d47a1;
+            outline: none;
+        }
+
+        /* Upload Button Styling */
+        .upload-area {
+            background-color: #e3f2fd;
+            border: 2px dashed #0d47a1;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            font-size: 1.2rem;
+            color: #0d47a1;
+            font-weight: bold;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            transition: background-color 0.3s ease;
+        }
+
+        .upload-area:hover {
+            background-color: #bbdefb;
+        }
+
+        .upload-area.dragover {
+            background-color: #90caf9;
+        }
+
+        input[type="submit"] {
+            background-color: #0d47a1;
+            color: white;
+            padding: 15px 25px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.2rem;
+            cursor: pointer;
+            width: 100%;
+            transition: background-color 0.3s ease;
+        }
+
+        input[type="submit"]:hover {
+            background-color: #1976d2;
+        }
+
+        /* Progress Bar */
+        .progress-container {
+            width: 100%;
+            background-color: #f3f3f3;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .progress-bar {
+            width: 0;
+            height: 30px;
+            background-color: #0d47a1;
+            border-radius: 8px;
+            text-align: center;
+            color: white;
+            line-height: 30px;
+            font-weight: bold;
+        }
+
+        /* Success Message */
+        .success-message {
+            display: none;
+            color: green;
+            font-size: 1.5rem;
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        .download-link {
+            color: #0d47a1;
+            font-weight: bold;
+            text-decoration: none;
+            display: block;
+            margin-top: 15px;
+            font-size: 1.2rem;
+        }
+
+        .download-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Semi-transparent overlay for background contrast -->
+    <div class="overlay"></div>
+
+    <!-- Bank Title and Description -->
+    <h1>First Iraqi Bank</h1>
+    <div class="subheading">Upload Your Excel File for IYTC Card Form Generation</div>
+
+    <!-- Form for Uploading Files -->
+    <div class="form-container">
+       <form id="uploadForm" action="/upload" method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="card_type" value="iytc"> <!-- Add this line -->
+    <label for="excelFile">Upload your Excel file:</label>
+    <input type="file" name="file" id="excelFile" accept=".xlsx" required><br><br>
+    <input type="submit" value="Generate PDF">
+</form>
+    </div>
+
+    <!-- Progress Bar and Success Message -->
+    <div class="progress-container" id="progressContainer">
+        <div class="progress-bar" id="progressBar">0%</div>
+    </div>
+
+    <div class="success-message" id="successMessage">
+        <p>Your PDF files have been generated successfully.</p>
+        <a href="#" id="downloadLink" class="download-link" style="display: none;">Click here to download the ZIP file</a>
+    </div>
+
+    <script>
+    document.getElementById('uploadForm').addEventListener('submit', function (event) {
+        event.preventDefault();
+        let formData = new FormData(this);
+        document.getElementById('excelFile').disabled = true;
+        document.getElementById('progressContainer').style.display = 'block';
+
+        fetch('/upload', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            let progressBar = document.getElementById('progressBar');
+            let zipFilename = data.zip_filename; // Get the ZIP filename from the backend
+
+            let interval = setInterval(function () {
+                fetch('/progress')
+                    .then(response => response.json())
+                    .then(data => {
+                        let progress = data.progress;
+                        progressBar.style.width = progress + '%';
+                        progressBar.textContent = progress + '%';
+
+                        if (progress === 100) {
+                            clearInterval(interval);
+                            document.getElementById('successMessage').style.display = 'block';
+
+                            // Show the download link after progress reaches 100%
+                            const downloadLink = document.getElementById('downloadLink');
+                            downloadLink.href = `/download/${zipFilename}`;
+                            downloadLink.style.display = 'block';  // Make sure it's visible
+                        }
+                    });
+            }, 1000);
+        })
+        .catch(error => {
+            console.error('Error uploading files:', error);
+        });
+    });
+</script>
+
+</body>
+
+</html>

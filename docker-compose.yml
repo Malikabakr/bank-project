@@ -1,0 +1,71 @@
+services:
+  # Main Flask application
+  card-processing-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: card-processing-system
+    restart: unless-stopped
+    
+    # Environment variables from .env file
+    env_file:
+      - .env
+    
+    # Additional environment variables
+    environment:
+      - FLASK_APP=app.py
+      - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1
+    
+    # Port mapping
+    ports:
+      - "${HOST_PORT:-5048}:${CONTAINER_PORT:-5048}"
+    
+    # Volume mounts
+    volumes:
+      # Mount uploads directory for persistent storage (optional)
+      - ./static/uploads:/app/static/uploads
+      # Mount logs directory (optional)
+      - ./logs:/app/logs
+    
+    # Network configuration
+    networks:
+      - card-processing-network
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5048').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  card-processing-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  app-uploads:
+    driver: local
+  app-logs:
+    driver: local

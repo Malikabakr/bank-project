@@ -1,0 +1,86 @@
+{% extends 'base.html' %}
+
+{% block title %}Upload Excel File{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h3 class="mb-0">
+                    <i class="fas fa-file-upload me-2"></i>
+                    Upload Excel File
+                </h3>
+            </div>
+            <div class="card-body p-4">
+                <p class="lead mb-4">
+                    Upload your Excel file containing bank statement data. Each row will be converted into an individual PDF bank statement.
+                </p>
+                
+                <form action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data" class="mb-4">
+                    <div class="mb-4">
+                        <label for="file" class="form-label fw-bold">Select Excel File</label>
+                        <input type="file" class="form-control form-control-lg" id="file" name="file" accept=".xlsx,.xls" required>
+                        <div class="form-text">
+                            Supported formats: .xlsx, .xls (Excel files)
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-info mb-4">
+                        <h5 class="alert-heading">
+                            <i class="fas fa-info-circle me-2"></i>
+                            Important Information
+                        </h5>
+                        <p class="mb-0">Your Excel file should contain data for bank statements. The following columns are recommended:</p>
+                        <ul class="mb-0 mt-2">
+                            <li>Name/Account Holder</li>
+                            <li>Account Number</li>
+                            <li>Date</li>
+                            <li>Transaction Description</li>
+                            <li>Amount</li>
+                            <li>Balance</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="fas fa-upload me-2"></i>
+                            Upload and Process
+                        </button>
+                    </div>
+                </form>
+                
+                <div class="card">
+                    <div class="card-body bg-light">
+                        <h5 class="card-title">
+                            <i class="fas fa-lightbulb me-2 text-warning"></i>
+                            Tips for Best Results
+                        </h5>
+                        <ul class="mb-0">
+                            <li>Ensure your Excel file is properly formatted with headers</li>
+                            <li>Each row should represent a complete bank statement</li>
+                            <li>Avoid special characters in column names</li>
+                            <li>Maximum file size: 16MB</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Validate file input
+    document.getElementById('file').addEventListener('change', function(e) {
+        const fileName = e.target.files[0].name;
+        const fileExt = fileName.split('.').pop().toLowerCase();
+        
+        if (!['xlsx', 'xls'].includes(fileExt)) {
+            alert('Please select a valid Excel file (.xlsx or .xls)');
+            this.value = '';
+        }
+    });
+</script>
+{% endblock %}
