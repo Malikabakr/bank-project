@@ -4,6 +4,7 @@ import uuid
 import zipfile
 import time
 import threading
+from io import BytesIO
 from datetime import datetime, timedelta
 from flask import (
     Flask,
@@ -27,6 +28,7 @@ from reportlab.pdfbase import pdfmetrics
 from arabic_reshaper import reshape
 from bidi.algorithm import get_display
 import openpyxl
+from openpyxl.utils import get_column_letter
 from fpdf import FPDF
 import re
 import fitz
@@ -1119,6 +1121,75 @@ def show_progress(job_type):
     return render_template("progress.html", job_type=job_type)
 
 
+def cleanup_uploads_folder():
+    """Clean up temporary files in the uploads folder while preserving important data"""
+    try:
+        # Files to preserve (case-insensitive)
+        preserve_files = {
+            "NotoNaskhArabic-Regular.ttf",
+            "times.ttf",
+            "platinum.pdf",
+            "Corporate.pdf",
+            "Business.pdf",
+            "ISIC.pdf",
+            "ITIC.pdf",
+            "IYTC.pdf",
+            "cardcollection.pdf",
+        }
+
+        # Directories to preserve
+        preserve_dirs = {
+            os.path.join(PROJECT_FOLDER, "static", "card_templates"),
+            os.path.join(PROJECT_FOLDER, "static", "assets"),
+        }
+
+        # Only clean specific temporary directories
+        temp_dirs = [
+            os.path.join(UPLOAD_FOLDER, "temp"),
+            os.path.join(UPLOAD_FOLDER, "pdf"),
+        ]
+
+        logger.info("Starting cleanup of temporary files...")
+
+        # Clean temporary directories
+        for directory in temp_dirs:
+            if os.path.exists(directory):
+                logger.info(f"Cleaning directory: {directory}")
+                for filename in os.listdir(directory):
+                    file_path = os.path.join(directory, filename)
+                    try:
+                        # Skip if file should be preserved
+                        if os.path.basename(file_path).lower() in {
+                            f.lower() for f in preserve_files
+                        }:
+                            logger.info(f"Preserving file: {file_path}")
+                            continue
+
+                        # Skip if directory should be preserved
+                        if any(
+                            os.path.commonpath([file_path]) == os.path.commonpath([d])
+                            for d in preserve_dirs
+                        ):
+                            logger.info(f"Preserving directory: {file_path}")
+                            continue
+
+                        # Delete temporary files and directories
+                        if os.path.isfile(file_path):
+                            os.unlink(file_path)
+                            logger.info(f"Deleted temporary file: {file_path}")
+                        elif os.path.isdir(file_path):
+                            import shutil
+
+                            shutil.rmtree(file_path)
+                            logger.info(f"Deleted temporary directory: {file_path}")
+                    except Exception as e:
+                        logger.error(f"Error processing {file_path}: {str(e)}")
+
+        logger.info("Cleanup of temporary files completed successfully")
+    except Exception as e:
+        logger.error(f"Error during cleanup: {str(e)}")
+
+
 @app.route("/download/<filename>")
 def download_file(filename):
     """Download a generated file (ZIP or PDF) and clean up temporary files afterward"""
@@ -1504,7 +1575,7 @@ if __name__ == "__main__":
 
     # Get configuration from environment variables
     host = os.environ.get("HOST", "0.0.0.0")
-    port = int(os.environ.get("PORT", 5048))
+    port = int(os.environ.get("PORT", 5656))
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"
 
     try:
