@@ -1,3 +1,17 @@
+
+Health check endpoint:
+-- URL: `http://localhost:5048/`
++- URL: `http://localhost:5656/`
+- Interval: 30 seconds
+- Timeout: 10 seconds
+- Retries: 3
+@@ -182,7 +182,7 @@
+1. ✅ Build and run: `docker-compose up --build -d`
+2. ✅ Check logs: `docker-compose logs -f`
+-3. ✅ Access app: `http://localhost:5048`
++3. ✅ Access app: `http://localhost:5656`
+4. ✅ Monitor: `docker stats card-processing-system`
+5. ✅ Stop: `docker-compose down`
 # 🐳 Docker Deployment Guide
 
 Complete guide for running the Card Delivery Processing System using Docker.
@@ -7,7 +21,7 @@ Complete guide for running the Card Delivery Processing System using Docker.
 - Docker Desktop installed (Mac, Windows, or Linux)
 - Docker Compose v1.27.0 or higher
 - At least 2GB of available RAM
-- Port 5048 available (or configure a different port in `.env`)
+- Port 5656 available (or configure a different port in `.env`)
 
 ## 🚀 Quick Start
 
@@ -313,10 +327,7 @@ docker inspect --format='{{range .State.Health.Log}}{{.Output}}{{end}}' card-pro
 ```
 
 Health check endpoint:
-- URL: `http://localhost:5048/`
-- Interval: 30 seconds
-- Timeout: 10 seconds
-- Retries: 3
+- URL: `http://localhost:5656/`
 
 ## 🧹 Cleanup
 
@@ -374,6 +385,6 @@ For issues related to:
 
 1. ✅ Build and run: `docker-compose up --build -d`
 2. ✅ Check logs: `docker-compose logs -f`
-3. ✅ Access app: `http://localhost:5048`
+3. ✅ Access app: `http://localhost:5656`
 4. ✅ Monitor: `docker stats card-processing-system`
 5. ✅ Stop: `docker-compose down`
